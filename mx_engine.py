@@ -402,12 +402,10 @@ async def run_download(
     # Add resolution selection if specified and not "best"
     if resolution and resolution not in ["best", "Best"]:
         # Format: --select-video "res=1080*" for 1080p
-        cmd.extend(["--select-video", f"res={resolution}*"])
+        cmd.extend(["-sv", f"res={resolution}*"])
 
-    # Add audio selection if specified and not "default"
-    if audio_track and audio_track not in ["default", "Default"]:
-        # Try by name first, fallback to language
-        cmd.extend(["--select-audio", f"name={audio_track}"])
+    # Use auto-select to get best audio automatically (don't filter audio)
+    cmd.append("--auto-select")
 
     # Log the command for debugging
     print(f"[DEBUG] Running command: {' '.join(cmd)}")

@@ -1,27 +1,28 @@
 """
-Pyrogram-based uploader with tgcrypto acceleration and progress tracking.
+Pyrogram-based uploader with tgcrypto acceleration and professional progress tracking.
 """
 
 import asyncio
 import time
-from typing import Optional, Callable
+from typing import Optional
 from pyrogram import Client
 from pyrogram.errors import FloodWait
 
 
-def generate_progress_bar(percent: float) -> str:
+def generate_progress_bar(percent: float, width: int = 12) -> str:
     """
-    Generate a visual progress bar.
+    Generate a professional visual progress bar.
 
     Args:
         percent: Percentage value (0-100)
+        width: Width of the progress bar
 
     Returns:
-        String progress bar like "[▓▓▓▓▓░░░░░] 45.2%"
+        String progress bar like "████████░░░░"
     """
-    filled = int(percent // 10)
-    bar = "▓" * filled + "░" * (10 - filled)
-    return f"[{bar}] {percent:.1f}%"
+    filled = int(percent / 100 * width)
+    empty = width - filled
+    return "█" * filled + "░" * empty
 
 
 def format_size(size_bytes: int) -> str:
@@ -44,6 +45,50 @@ def format_size(size_bytes: int) -> str:
         return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
 
 
+def format_speed(bytes_per_sec: float) -> str:
+    """
+    Format speed to human-readable format.
+
+    Args:
+        bytes_per_sec: Speed in bytes per second
+
+    Returns:
+        Formatted string like "12.5 MB/s"
+    """
+    if bytes_per_sec < 1024:
+        return f"{bytes_per_sec:.0f} B/s"
+    elif bytes_per_sec < 1024 * 1024:
+        return f"{bytes_per_sec / 1024:.1f} KB/s"
+    else:
+        return f"{bytes_per_sec / (1024 * 1024):.2f} MB/s"
+
+
+def format_time(seconds: float) -> str:
+    """
+    Format seconds to human-readable time.
+
+    Args:
+        seconds: Time in seconds
+
+    Returns:
+        Formatted string like "2m 30s" or "1h 5m"
+    """
+    if seconds < 0:
+        return "calculating..."
+
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    elif seconds < 3600:
+        mins = seconds // 60
+        secs = seconds % 60
+        return f"{mins}m {secs}s"
+    else:
+        hours = seconds // 3600
+        mins = (seconds % 3600) // 60
+        return f"{hours}h {mins}m"
+
+
 async def upload_with_progress(
     client: Client,
     chat_id: int,
@@ -55,7 +100,7 @@ async def upload_with_progress(
     filename: str = ""
 ) -> bool:
     """
-    Upload video to Telegram with progress updates.
+    Upload video to Telegram with professional progress updates.
 
     Uses Pyrogram's native progress callback with tgcrypto acceleration
     (auto-enabled when tgcrypto is installed).
@@ -74,42 +119,64 @@ async def upload_with_progress(
         True on success, False on failure
     """
     last_update_time = 0
-    update_interval = 3  # Update every 3 seconds to avoid FloodWait
+    update_interval = 2  # Update every 2 seconds
+    start_time = time.time()
+    last_bytes = 0
+    last_speed_time = start_time
 
     async def progress_callback(current: int, total: int):
         """
-        Pyrogram progress callback.
-
-        Args:
-            current: Bytes uploaded so far
-            total: Total file size in bytes
+        Pyrogram progress callback with speed and ETA calculation.
         """
-        nonlocal last_update_time
+        nonlocal last_update_time, last_bytes, last_speed_time
 
         now = time.time()
         if now - last_update_time < update_interval:
             return
 
         if progress_message and total > 0:
+            # Calculate progress
             percent = (current / total) * 100
             progress_bar = generate_progress_bar(percent)
+
+            # Calculate speed (bytes per second)
+            time_diff = now - last_speed_time
+            if time_diff > 0:
+                bytes_diff = current - last_bytes
+                speed = bytes_diff / time_diff
+            else:
+                speed = 0
+
+            # Calculate ETA
+            remaining_bytes = total - current
+            if speed > 0:
+                eta_seconds = remaining_bytes / speed
+            else:
+                eta_seconds = -1
+
+            # Format sizes
             current_size = format_size(current)
             total_size = format_size(total)
+            speed_str = format_speed(speed)
+            eta_str = format_time(eta_seconds)
 
+            # Build professional progress message
             text = (
-                f"⬆️ **Uploading {filename}**\n"
-                f"{progress_bar}\n"
-                f"📁 {current_size} / {total_size}"
+                f"**Uploading**\n\n"
+                f"`{progress_bar}` **{percent:.1f}%**\n\n"
+                f"**Progress:** {current_size} / {total_size}\n"
+                f"**Speed:** {speed_str}\n"
+                f"**ETA:** {eta_str}"
             )
 
             try:
                 await progress_message.edit_text(text)
                 last_update_time = now
+                last_bytes = current
+                last_speed_time = now
             except FloodWait as e:
-                # Wait and retry
                 await asyncio.sleep(e.value)
             except Exception:
-                # Silently ignore other edit errors
                 pass
 
     # Retry logic for FloodWait

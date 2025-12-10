@@ -48,7 +48,7 @@ from states import (
     clear_state
 )
 import mx_engine
-from uploader import upload_with_progress, generate_progress_bar
+from uploader import upload_with_progress, generate_progress_bar, format_time
 
 # Setup logging
 logging.basicConfig(
@@ -698,28 +698,49 @@ async def worker():
             # Progress message
             prog_msg = await app.send_message(
                 chat_id,
-                f"⬇️ **Downloading {metadata['title']}**\n"
-                f"{generate_progress_bar(0)}\n"
-                "`Starting download...`"
+                "**Downloading**\n\n"
+                f"`{generate_progress_bar(0)}` **0.0%**\n\n"
+                "**Status:** Starting download..."
             )
 
             try:
-                # Progress callback
+                # Progress tracking state
+                download_start_time = time.time()
                 last_edit_time = 0
+                last_percent = 0
 
                 async def download_progress(percent: float, raw_line: str):
-                    nonlocal last_edit_time
+                    nonlocal last_edit_time, last_percent
                     now = time.time()
 
-                    # Update every 5 seconds
-                    if now - last_edit_time > 5:
+                    # Update every 3 seconds
+                    if now - last_edit_time > 3:
                         try:
-                            await prog_msg.edit_text(
-                                f"⬇️ **Downloading {metadata['title']}**\n"
-                                f"{generate_progress_bar(percent)}\n"
-                                f"`{raw_line[:50]}...`" if len(raw_line) > 50 else f"`{raw_line}`"
+                            # Calculate ETA based on progress
+                            elapsed = now - download_start_time
+                            if percent > 0:
+                                total_estimated = elapsed / (percent / 100)
+                                eta_seconds = total_estimated - elapsed
+                            else:
+                                eta_seconds = -1
+
+                            eta_str = format_time(eta_seconds)
+                            elapsed_str = format_time(elapsed)
+
+                            # Extract meaningful status from raw_line
+                            status = raw_line[:60] + "..." if len(raw_line) > 60 else raw_line
+
+                            text = (
+                                f"**Downloading**\n\n"
+                                f"`{generate_progress_bar(percent)}` **{percent:.1f}%**\n\n"
+                                f"**Elapsed:** {elapsed_str}\n"
+                                f"**ETA:** {eta_str}\n"
+                                f"**Status:** `{status}`"
                             )
+
+                            await prog_msg.edit_text(text)
                             last_edit_time = now
+                            last_percent = percent
                         except FloodWait as e:
                             await asyncio.sleep(e.value)
                         except Exception:
