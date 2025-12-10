@@ -1,0 +1,16 @@
+# MX Player Telegram Bot Dependencies
+
+# Telegram bot framework with native tgcrypto support
+pyrogram>=2.0.106
+
+# Crypto acceleration for fast uploads (auto-detected by pyrogram)
+tgcrypto>=1.2.5
+
+# Async file operations for cookie handling
+aiofiles>=23.2.1
+
+# HTTP client for async web scraping
+aiohttp>=3.9.0
+
+# Environment variable loading
+python-dotenv>=1.0.0
