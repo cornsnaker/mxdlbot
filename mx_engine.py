@@ -382,7 +382,12 @@ async def run_download(
         "--save-name", filename,
         "--thread-count", "16",
         "--download-retry-count", "5",
-        "-M", "format=mp4"
+        # Mux to MP4 with ffmpeg muxer for full metadata
+        "-M", "format=mp4:muxer=ffmpeg",
+        # Download video, audio, and subtitles concurrently
+        "-mt",
+        # Auto-select best tracks
+        "--auto-select"
     ]
 
     # Add custom headers
@@ -401,9 +406,6 @@ async def run_download(
     if resolution and resolution not in ["best", "Best"]:
         # Format: --select-video "res=1080*" for 1080p
         cmd.extend(["-sv", f"res={resolution}*"])
-
-    # Use auto-select to get best audio automatically (don't filter audio)
-    cmd.append("--auto-select")
 
     # Log the command for debugging
     print(f"[DEBUG] Running command: {' '.join(cmd)}")
