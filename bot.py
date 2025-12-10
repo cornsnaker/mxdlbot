@@ -17,6 +17,12 @@ import time
 import aiofiles
 from typing import Dict, Optional
 
+# Fix for Python 3.10+ asyncio event loop issue with Pyrogram
+import sys
+if sys.version_info >= (3, 10):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
 from pyrogram import Client, filters
 from pyrogram.types import (
     Message,
