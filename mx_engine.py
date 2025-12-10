@@ -356,26 +356,28 @@ async def run_download(
         "-M", "format=mp4"
     ]
 
-    # Add per-user cookies if available
+    # Add per-user cookies file if available (N_m3u8DL-RE uses --cookies flag)
     cookies_path = get_user_cookies_path(user_id)
     if os.path.exists(cookies_path):
-        with open(cookies_path, 'r') as f:
-            cookie_content = f.read().strip()
-        if cookie_content:
-            cmd.extend(["--header", f"Cookie: {cookie_content}"])
+        cmd.extend(["--cookies", cookies_path])
 
-    # Add User-Agent header
+    # Add custom headers
     cmd.extend(["--header", f"User-Agent: {USER_AGENT}"])
+    cmd.extend(["--header", f"Origin: {ORIGIN}"])
+    cmd.extend(["--header", f"Referer: {ORIGIN}/"])
 
-    # Add resolution selection
-    if resolution:
+    # Add resolution selection if specified and not "best"
+    if resolution and resolution not in ["best", "Best"]:
         # Format: --select-video "res=1080*" for 1080p
         cmd.extend(["--select-video", f"res={resolution}*"])
 
-    # Add audio selection
-    if audio_track:
-        # Format: --select-audio "lang=hi" for Hindi
-        cmd.extend(["--select-audio", f"lang={audio_track}"])
+    # Add audio selection if specified and not "default"
+    if audio_track and audio_track not in ["default", "Default"]:
+        # Try by name first, fallback to language
+        cmd.extend(["--select-audio", f"name={audio_track}"])
+
+    # Log the command for debugging
+    print(f"[DEBUG] Running command: {' '.join(cmd)}")
 
     # Run subprocess with timeout
     try:
@@ -393,6 +395,10 @@ async def run_download(
                     break
                 line_str = line.decode().strip()
 
+                # Log output for debugging
+                if line_str:
+                    print(f"[N_m3u8DL-RE] {line_str}")
+
                 # Parse progress percentage from N_m3u8DL-RE output
                 if "%" in line_str and progress_callback:
                     try:
@@ -408,8 +414,13 @@ async def run_download(
         await asyncio.wait_for(read_progress(), timeout=DOWNLOAD_TIMEOUT)
         await process.wait()
 
+        print(f"[DEBUG] Process exit code: {process.returncode}")
+
         final_path = f"{output_path}.mp4"
-        return final_path, process.returncode == 0 and os.path.exists(final_path)
+        exists = os.path.exists(final_path)
+        print(f"[DEBUG] Output file exists: {exists}, path: {final_path}")
+
+        return final_path, process.returncode == 0 and exists
 
     except asyncio.TimeoutError:
         # Kill process on timeout

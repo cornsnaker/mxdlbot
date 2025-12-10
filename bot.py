@@ -136,11 +136,11 @@ def build_audio_keyboard(audio_tracks: list) -> InlineKeyboardMarkup:
     buttons = []
     row = []
 
-    for track in audio_tracks:
-        name = track.get('name', track.get('language', 'Unknown'))
-        lang = track.get('language', '')
+    for idx, track in enumerate(audio_tracks):
+        name = track.get('name', track.get('language', f'Track {idx+1}'))
         label = f"🔊 {name}"
-        callback = f"audio:{lang}"
+        # Use index to identify track reliably
+        callback = f"audio:{idx}"
         row.append(InlineKeyboardButton(text=label, callback_data=callback))
 
         # 2 buttons per row
@@ -369,14 +369,13 @@ async def process_link(client: Client, message: Message):
         if skip_quality and skip_audio:
             # Go directly to confirmation with defaults
             default_res = resolutions[0]['height'] if resolutions else "best"
-            default_audio = audio_tracks[0].get('language', 'default') if audio_tracks else "default"
-            default_audio_name = audio_tracks[0].get('name', 'Default') if audio_tracks else "Default"
+            default_audio_name = audio_tracks[0].get('name', audio_tracks[0].get('language', 'Default')) if audio_tracks else "Default"
 
             set_state(
                 user_id,
                 step=UserStep.CONFIRMATION,
                 selected_resolution=str(default_res),
-                selected_audio=default_audio
+                selected_audio=default_audio_name
             )
 
             caption = build_confirmation_caption(
@@ -448,13 +447,12 @@ async def callback_resolution(client: Client, callback: CallbackQuery):
 
     if len(audio_tracks) <= 1:
         # Skip to confirmation
-        default_audio = audio_tracks[0].get('language', 'default') if audio_tracks else "default"
-        default_audio_name = audio_tracks[0].get('name', 'Default') if audio_tracks else "Default"
+        default_audio_name = audio_tracks[0].get('name', audio_tracks[0].get('language', 'Default')) if audio_tracks else "Default"
 
         set_state(
             user_id,
             step=UserStep.CONFIRMATION,
-            selected_audio=default_audio
+            selected_audio=default_audio_name
         )
 
         caption = build_confirmation_caption(
@@ -499,21 +497,24 @@ async def callback_audio(client: Client, callback: CallbackQuery):
         await callback.answer("❌ Session expired. Please send the link again.")
         return
 
-    # Extract audio language
-    audio_lang = callback.data.split(':')[1]
+    # Extract audio track index
+    audio_idx = int(callback.data.split(':')[1])
+    audio_tracks = state.audio_tracks or []
 
-    # Find audio name for display
-    audio_name = "Default"
-    for track in (state.audio_tracks or []):
-        if track.get('language') == audio_lang:
-            audio_name = track.get('name', audio_lang)
-            break
+    # Get the selected track info
+    if audio_idx < len(audio_tracks):
+        selected_track = audio_tracks[audio_idx]
+        audio_name = selected_track.get('name', selected_track.get('language', 'Default'))
+    else:
+        audio_name = "Default"
+        selected_track = {}
 
     # Store selection and move to confirmation
+    # Store the track name for N_m3u8DL-RE --select-audio
     set_state(
         user_id,
         step=UserStep.CONFIRMATION,
-        selected_audio=audio_lang
+        selected_audio=audio_name
     )
 
     caption = build_confirmation_caption(
