@@ -357,18 +357,16 @@ async def run_download(
     filename: str,
     user_id: int,
     resolution: Optional[str] = None,
-    audio_track: Optional[str] = None,
     progress_callback: Optional[Callable] = None
 ) -> Tuple[str, bool]:
     """
-    Run N_m3u8DL-RE asynchronously with quality/audio selection and progress tracking.
+    Run N_m3u8DL-RE asynchronously with quality selection and all audio tracks.
 
     Args:
         m3u8_url: Master m3u8 URL
         filename: Output filename (without extension)
         user_id: Telegram user ID for cookie lookup
         resolution: Selected resolution height (e.g., "1080") or None for best
-        audio_track: Selected audio language code (e.g., "hi") or None for default
         progress_callback: Async callback function(percent, raw_line)
 
     Returns:
