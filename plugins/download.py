@@ -17,13 +17,13 @@ from config import (
     DOWNLOAD_DIR
 )
 from states import get_state, set_state, clear_state, UserStep
-from services.mx_scraper import mx_scraper, VideoMetadata
+from services.mx_scraper import mx_scraper, VideoMetadata, AudioTrack
 from services.downloader import downloader, sanitize_filename, get_video_duration
 from services.uploader import Uploader
 from services.thumbnail import ThumbnailService
 from utils.progress import DownloadProgress, UploadProgress
 from utils.formatters import format_size, format_duration, format_user_mention
-from utils.notifications import Toast, build_final_message
+from utils.notifications import Toast, build_final_message, build_detailed_caption
 
 
 # MX Player URL pattern
@@ -147,10 +147,11 @@ async def handle_link(client: Client, message: Message):
             await toast.error("Video stream not found. Content may be DRM protected.")
             return
 
-        # Parse resolutions from m3u8
+        # Parse resolutions and audio tracks from m3u8
         resolutions = await mx_scraper.parse_master_m3u8(metadata.m3u8_url)
+        audio_tracks = await mx_scraper.parse_audio_tracks(metadata.m3u8_url)
 
-        # Store state
+        # Store state with audio info
         set_state(
             user_id,
             step=UserStep.SELECT_QUALITY,
@@ -164,7 +165,11 @@ async def handle_link(client: Client, message: Message):
                 'episode_title': metadata.episode_title,
                 'is_movie': metadata.is_movie,
                 'm3u8_url': metadata.m3u8_url,
-                'duration': metadata.duration
+                'duration': metadata.duration,
+                'genres': metadata.genres,
+                'release_year': metadata.release_year,
+                'rating': metadata.rating,
+                'audio_tracks': [{'name': t.name, 'language': t.language} for t in audio_tracks]
             },
             resolutions=[{'height': r.height, 'label': r.label, 'bandwidth': r.bandwidth} for r in resolutions]
         )
@@ -385,12 +390,25 @@ async def callback_start_download(client: Client, callback: CallbackQuery):
             filename=filename
         )
 
-        # Build caption
-        caption = build_final_message(
+        # Get audio language names
+        audio_languages = [t['name'] for t in metadata_dict.get('audio_tracks', [])]
+
+        # Build detailed caption
+        caption = build_detailed_caption(
             title=metadata_dict['title'],
+            show_title=metadata_dict['title'] if not metadata_dict['is_movie'] else None,
+            season=metadata_dict.get('season'),
+            episode=metadata_dict.get('episode'),
+            episode_title=metadata_dict.get('episode_title'),
             duration=format_duration(duration) if duration else None,
             size=format_size(result.file_size),
             quality=f"{resolution}p" if resolution and resolution != "best" else "Best",
+            audio_languages=audio_languages if audio_languages else ["All available"],
+            description=metadata_dict.get('description'),
+            genres=metadata_dict.get('genres'),
+            release_year=metadata_dict.get('release_year'),
+            rating=metadata_dict.get('rating'),
+            is_movie=metadata_dict['is_movie'],
             user_mention=format_user_mention(user_id, callback.from_user.first_name)
         )
 
@@ -408,12 +426,18 @@ async def callback_start_download(client: Client, callback: CallbackQuery):
 
         if upload_result.success:
             if upload_result.platform == "gofile":
-                # File was uploaded to Gofile
-                final_text = build_final_message(
+                # File was uploaded to Gofile - build caption with gofile link
+                final_text = build_detailed_caption(
                     title=metadata_dict['title'],
+                    show_title=metadata_dict['title'] if not metadata_dict['is_movie'] else None,
+                    season=metadata_dict.get('season'),
+                    episode=metadata_dict.get('episode'),
+                    episode_title=metadata_dict.get('episode_title'),
                     duration=format_duration(duration) if duration else None,
                     size=format_size(result.file_size),
                     quality=f"{resolution}p" if resolution and resolution != "best" else "Best",
+                    audio_languages=audio_languages if audio_languages else ["All available"],
+                    is_movie=metadata_dict['is_movie'],
                     user_mention=format_user_mention(user_id, callback.from_user.first_name),
                     gofile_link=upload_result.gofile_link
                 )

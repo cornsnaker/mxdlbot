@@ -22,6 +22,11 @@ class VideoMetadata:
     is_movie: bool
     m3u8_url: Optional[str]
     duration: Optional[int] = None
+    show_id: Optional[str] = None
+    content_id: Optional[str] = None
+    genres: Optional[List[str]] = None
+    release_year: Optional[int] = None
+    rating: Optional[str] = None
 
 
 @dataclass
@@ -32,6 +37,36 @@ class Resolution:
     bandwidth: int
     uri: str
     label: str  # e.g., "1080p"
+
+
+@dataclass
+class AudioTrack:
+    """Audio track info."""
+    name: str
+    language: str
+    group_id: str
+    uri: Optional[str] = None
+    is_default: bool = False
+
+
+@dataclass
+class EpisodeInfo:
+    """Episode info for show browser."""
+    title: str
+    episode_number: int
+    season_number: int
+    url: str
+    thumbnail: Optional[str] = None
+    duration: Optional[int] = None
+    description: Optional[str] = None
+
+
+@dataclass
+class SeasonInfo:
+    """Season info for show browser."""
+    season_number: int
+    title: str
+    episodes: List[EpisodeInfo]
 
 
 class MXScraper:
@@ -326,6 +361,75 @@ class MXScraper:
             print(f"[MXScraper] M3U8 parse error: {e}")
             return []
 
+    async def parse_audio_tracks(self, m3u8_url: str) -> List[AudioTrack]:
+        """
+        Parse master m3u8 playlist for available audio tracks.
+
+        Args:
+            m3u8_url: URL to master m3u8 playlist
+
+        Returns:
+            List of AudioTrack objects
+        """
+        audio_tracks = []
+
+        try:
+            session = await self._get_session()
+            async with session.get(m3u8_url) as resp:
+                if resp.status != 200:
+                    return audio_tracks
+                content = await resp.text()
+
+            base_url = m3u8_url.rsplit('/', 1)[0] + '/'
+
+            # Parse #EXT-X-MEDIA:TYPE=AUDIO lines
+            pattern = r'#EXT-X-MEDIA:TYPE=AUDIO[^\n]+'
+            matches = re.findall(pattern, content)
+
+            for match in matches:
+                track = self._parse_audio_media(match, base_url)
+                if track:
+                    audio_tracks.append(track)
+
+            # Remove duplicates by language
+            seen_langs = set()
+            unique = []
+            for track in audio_tracks:
+                if track.language not in seen_langs:
+                    seen_langs.add(track.language)
+                    unique.append(track)
+
+            return unique
+
+        except Exception as e:
+            print(f"[MXScraper] Audio track parse error: {e}")
+            return []
+
+    def _parse_audio_media(self, line: str, base_url: str) -> Optional[AudioTrack]:
+        """Parse #EXT-X-MEDIA:TYPE=AUDIO line."""
+        name_match = re.search(r'NAME="([^"]*)"', line)
+        lang_match = re.search(r'LANGUAGE="([^"]*)"', line)
+        group_match = re.search(r'GROUP-ID="([^"]*)"', line)
+        uri_match = re.search(r'URI="([^"]*)"', line)
+        default_match = re.search(r'DEFAULT=(YES|NO)', line)
+
+        if name_match and lang_match:
+            uri = None
+            if uri_match:
+                uri = uri_match.group(1)
+                if not uri.startswith('http'):
+                    uri = urljoin(base_url, uri)
+
+            return AudioTrack(
+                name=name_match.group(1),
+                language=lang_match.group(1),
+                group_id=group_match.group(1) if group_match else "",
+                uri=uri,
+                is_default=default_match.group(1) == "YES" if default_match else False
+            )
+
+        return None
+
     def _parse_stream_inf(self, line: str) -> Optional[Resolution]:
         """Parse #EXT-X-STREAM-INF line."""
         bandwidth = 0
@@ -351,6 +455,186 @@ class MXScraper:
             )
 
         return None
+
+    async def get_show_seasons(self, show_url: str) -> List[SeasonInfo]:
+        """
+        Get all seasons and episodes for a show.
+
+        Args:
+            show_url: MX Player show URL
+
+        Returns:
+            List of SeasonInfo objects with episodes
+        """
+        html = await self.fetch_html(show_url)
+        if not html:
+            return []
+
+        seasons = []
+
+        try:
+            # Extract show ID from URL
+            show_id_match = re.search(r'/show/([^/]+)', show_url)
+            if not show_id_match:
+                return []
+
+            show_id = show_id_match.group(1)
+
+            # Try to find season/episode data in JSON
+            # Look for __NEXT_DATA__ or similar embedded JSON
+            next_data_match = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
+            if next_data_match:
+                try:
+                    data = json.loads(next_data_match.group(1))
+                    seasons = self._parse_next_data_episodes(data, show_url)
+                    if seasons:
+                        return seasons
+                except json.JSONDecodeError:
+                    pass
+
+            # Fallback: Parse episode links from HTML
+            seasons = self._parse_html_episodes(html, show_url)
+
+        except Exception as e:
+            print(f"[MXScraper] Show seasons error: {e}")
+
+        return seasons
+
+    def _parse_next_data_episodes(self, data: Dict, base_url: str) -> List[SeasonInfo]:
+        """Parse episodes from __NEXT_DATA__ JSON."""
+        seasons = []
+
+        try:
+            # Navigate to episodes data (structure varies)
+            props = data.get('props', {}).get('pageProps', {})
+
+            # Try different possible paths
+            episodes_data = (
+                props.get('episodes') or
+                props.get('seasonEpisodes') or
+                props.get('show', {}).get('episodes') or
+                []
+            )
+
+            if not episodes_data:
+                return []
+
+            # Group by season
+            season_map = {}
+            for ep in episodes_data:
+                season_num = ep.get('seasonNumber', 1)
+                if season_num not in season_map:
+                    season_map[season_num] = []
+
+                episode = EpisodeInfo(
+                    title=ep.get('title', ep.get('name', f"Episode {ep.get('episodeNumber', 0)}")),
+                    episode_number=ep.get('episodeNumber', 0),
+                    season_number=season_num,
+                    url=self._build_episode_url(base_url, ep),
+                    thumbnail=ep.get('image', ep.get('thumbnail')),
+                    duration=self._parse_duration(ep.get('duration')),
+                    description=ep.get('description')
+                )
+                season_map[season_num].append(episode)
+
+            # Convert to SeasonInfo list
+            for season_num in sorted(season_map.keys()):
+                episodes = sorted(season_map[season_num], key=lambda x: x.episode_number)
+                seasons.append(SeasonInfo(
+                    season_number=season_num,
+                    title=f"Season {season_num}",
+                    episodes=episodes
+                ))
+
+        except Exception as e:
+            print(f"[MXScraper] NEXT_DATA parse error: {e}")
+
+        return seasons
+
+    def _parse_html_episodes(self, html: str, base_url: str) -> List[SeasonInfo]:
+        """Parse episodes from HTML links (fallback method)."""
+        seasons = []
+
+        try:
+            # Find episode links
+            episode_pattern = r'href="([^"]*(?:episode|watch)[^"]*)"[^>]*>([^<]*)</a>'
+            matches = re.findall(episode_pattern, html, re.IGNORECASE)
+
+            if not matches:
+                # Try alternative pattern
+                episode_pattern = r'href="(/show/[^"]+/season-\d+/[^"]+)"'
+                matches = [(m, "") for m in re.findall(episode_pattern, html)]
+
+            # Parse and group
+            season_map = {}
+            for url, title in matches:
+                if not url.startswith('http'):
+                    url = urljoin(self.ORIGIN, url)
+
+                # Extract season and episode numbers
+                se_match = re.search(r'season-(\d+).*?(?:episode-|ep-?)(\d+)', url, re.IGNORECASE)
+                if se_match:
+                    season_num = int(se_match.group(1))
+                    ep_num = int(se_match.group(2))
+
+                    if season_num not in season_map:
+                        season_map[season_num] = []
+
+                    episode = EpisodeInfo(
+                        title=title.strip() if title else f"Episode {ep_num}",
+                        episode_number=ep_num,
+                        season_number=season_num,
+                        url=url
+                    )
+                    season_map[season_num].append(episode)
+
+            # Convert to SeasonInfo list
+            for season_num in sorted(season_map.keys()):
+                episodes = sorted(season_map[season_num], key=lambda x: x.episode_number)
+                # Remove duplicates
+                seen = set()
+                unique_eps = []
+                for ep in episodes:
+                    if ep.episode_number not in seen:
+                        seen.add(ep.episode_number)
+                        unique_eps.append(ep)
+
+                seasons.append(SeasonInfo(
+                    season_number=season_num,
+                    title=f"Season {season_num}",
+                    episodes=unique_eps
+                ))
+
+        except Exception as e:
+            print(f"[MXScraper] HTML episodes parse error: {e}")
+
+        return seasons
+
+    def _build_episode_url(self, base_url: str, episode_data: Dict) -> str:
+        """Build episode URL from episode data."""
+        if 'url' in episode_data:
+            url = episode_data['url']
+            if not url.startswith('http'):
+                return urljoin(self.ORIGIN, url)
+            return url
+
+        # Try to build from slug/id
+        slug = episode_data.get('slug') or episode_data.get('id', '')
+        if slug:
+            return f"{self.ORIGIN}/show/{slug}"
+
+        return base_url
+
+    def is_show_url(self, url: str) -> bool:
+        """Check if URL is a show page (not specific episode)."""
+        # Show URLs typically don't have episode number
+        if re.search(r'/episode-\d+', url, re.IGNORECASE):
+            return False
+        if re.search(r'/ep-\d+', url, re.IGNORECASE):
+            return False
+        if '/show/' in url and not re.search(r'season-\d+', url):
+            return True
+        return False
 
 
 # Global scraper instance

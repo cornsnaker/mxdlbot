@@ -8,6 +8,8 @@ Complete reference for all MX Player Bot commands and features.
 - [Admin Commands](#admin-commands)
 - [Owner Commands](#owner-commands)
 - [Interactive Features](#interactive-features)
+- [Show Browser](#show-browser)
+- [File Upload](#file-upload)
 - [Settings](#settings)
 
 ---
@@ -378,6 +380,31 @@ When a user sends an MX Player link, the bot initiates an interactive download f
    - Video sent to chat (if under 2GB)
    - Or Gofile.io link (if over 2GB)
 
+### Video Caption Format
+
+Videos include detailed captions with all available information:
+
+```
+📺 Show Title
+📍 Season 1 | Episode 5
+📝 Episode Title
+
+Video Info:
+├ Quality: `1080p`
+├ Duration: `45:30`
+├ Size: `1.2 GB`
+└ Audio: `Hindi, English, Tamil`
+
+Details:
+├ Year: `2024`
+├ Genre: `Drama, Thriller`
+└ Rating: `16+`
+
+Description of the video...
+
+👤 @username
+```
+
 ### Quality Selection Keyboard
 
 ```
@@ -393,6 +420,117 @@ When a user sends an MX Player link, the bot initiates an interactive download f
 [⬇️ Start Download]
 [⬅️ Back] [❌ Cancel]
 ```
+
+---
+
+## Show Browser
+
+The Show Browser allows you to browse and batch download episodes from TV shows.
+
+### How to Use
+
+1. **Send a Show URL** (not a specific episode)
+   - Example: `https://www.mxplayer.in/show/show-name`
+
+2. **Browse Seasons**
+   - Bot displays all available seasons
+   - Shows episode count per season
+   - Pagination for shows with many seasons
+
+3. **Browse Episodes**
+   - Select a season to see its episodes
+   - Episodes displayed with pagination (6 per page)
+
+4. **Select Episodes**
+   - Tap episodes to toggle selection
+   - Use "Select All" to select entire season
+   - Use "Clear" to deselect all
+
+5. **Download**
+   - Tap "Download (X)" to queue selected episodes
+   - Episodes download one by one automatically
+
+### Season Selection Keyboard
+
+```
+[S1 (12 ep)] [S2 (10 ep)]
+[S3 (8 ep)]  [S4 (15 ep)]
+[⬅️ Prev]   [Next ➡️]
+[❌ Cancel]
+```
+
+### Episode Selection Keyboard
+
+```
+[✓ Ep 1]
+[Ep 2]
+[✓ Ep 3]
+[Select All] [Clear]
+[⬅️ Prev] [📄 1/3] [Next ➡️]
+[⬅️ Seasons] [⬇️ Download (2)]
+[❌ Cancel]
+```
+
+### Tips
+
+- **Batch Downloads:** Select multiple episodes and they'll be queued automatically
+- **Navigation:** Use Back to return to season list at any time
+- **Selection Persists:** Selections are remembered when navigating pages
+
+---
+
+## File Upload
+
+Upload your own video or document files to re-upload them with Gofile support for large files.
+
+### Supported Formats
+
+**Video Files:**
+- MP4, MKV, AVI, MOV, WebM, FLV, WMV, M4V
+
+**Document Files:**
+- PDF, ZIP, RAR, 7Z, TAR, GZ
+
+### How to Use
+
+1. **Send a video or document file** directly to the bot
+2. Bot downloads and processes the file
+3. File is re-uploaded with progress tracking
+4. Large files (>2GB) automatically go to Gofile.io
+
+### Features
+
+- **Progress Tracking:** Visual progress bar during upload
+- **Custom Thumbnails:** Uses your custom thumbnail if set
+- **Gofile Support:** Files over 2GB uploaded to Gofile.io
+- **Auto-Cleanup:** Temporary files are cleaned up after upload
+
+### Limits
+
+| Limit | Value |
+|-------|-------|
+| Maximum file size | 4GB |
+| Telegram upload limit | 2GB |
+| Files >2GB | Go to Gofile.io |
+
+### Upload Caption Format
+
+```
+📁 File Title
+
+Filename: `filename.mp4`
+Size: `1.5 GB`
+
+🔗 Download: [Gofile Link](https://gofile.io/...)
+
+👤 Uploaded by: @username
+```
+
+### Notes
+
+- `.txt` files are handled as cookie files (use /auth)
+- Video duration is extracted automatically when possible
+- Custom thumbnail applies to video uploads only
 
 ---
 

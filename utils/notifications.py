@@ -183,3 +183,150 @@ def build_final_message(
         lines.append(f"**Requested by:** {user_mention}")
 
     return "\n".join(lines)
+
+
+def build_detailed_caption(
+    title: str,
+    show_title: Optional[str] = None,
+    season: Optional[int] = None,
+    episode: Optional[int] = None,
+    episode_title: Optional[str] = None,
+    duration: Optional[str] = None,
+    size: Optional[str] = None,
+    quality: Optional[str] = None,
+    audio_languages: Optional[list] = None,
+    description: Optional[str] = None,
+    genres: Optional[list] = None,
+    release_year: Optional[int] = None,
+    rating: Optional[str] = None,
+    is_movie: bool = False,
+    user_mention: Optional[str] = None,
+    gofile_link: Optional[str] = None
+) -> str:
+    """
+    Build detailed caption with all video information.
+
+    Args:
+        title: Video/Episode title
+        show_title: Show title (for episodes)
+        season: Season number
+        episode: Episode number
+        episode_title: Episode title
+        duration: Formatted duration
+        size: Formatted file size
+        quality: Video quality
+        audio_languages: List of audio language names
+        description: Video description
+        genres: List of genres
+        release_year: Release year
+        rating: Content rating
+        is_movie: True if movie, False if episode
+        user_mention: Markdown user mention
+        gofile_link: Gofile download link (if uploaded there)
+
+    Returns:
+        Formatted caption string
+    """
+    lines = []
+
+    # Title section
+    if is_movie:
+        lines.append(f"🎬 **{title}**")
+    else:
+        if show_title:
+            lines.append(f"📺 **{show_title}**")
+        if season is not None and episode is not None:
+            lines.append(f"📍 Season {season} | Episode {episode}")
+        if episode_title and episode_title != title:
+            lines.append(f"📝 _{episode_title}_")
+
+    lines.append("")
+
+    # Video info section
+    lines.append("**Video Info:**")
+
+    if quality:
+        lines.append(f"├ Quality: `{quality}`")
+
+    if duration:
+        lines.append(f"├ Duration: `{duration}`")
+
+    if size:
+        lines.append(f"├ Size: `{size}`")
+
+    if audio_languages:
+        audio_str = ", ".join(audio_languages[:5])
+        if len(audio_languages) > 5:
+            audio_str += f" +{len(audio_languages) - 5} more"
+        lines.append(f"└ Audio: `{audio_str}`")
+
+    # Additional info
+    if genres or release_year or rating:
+        lines.append("")
+        lines.append("**Details:**")
+
+        if release_year:
+            lines.append(f"├ Year: `{release_year}`")
+
+        if genres:
+            lines.append(f"├ Genre: `{', '.join(genres[:3])}`")
+
+        if rating:
+            lines.append(f"└ Rating: `{rating}`")
+
+    # Description (truncated)
+    if description:
+        lines.append("")
+        desc = description[:200] + "..." if len(description) > 200 else description
+        lines.append(f"_{desc}_")
+
+    # Gofile link if applicable
+    if gofile_link:
+        lines.append("")
+        lines.append(f"📁 **Download:** [Gofile Link]({gofile_link})")
+        lines.append("_(File exceeded Telegram's 2GB limit)_")
+
+    # Requested by
+    if user_mention:
+        lines.append("")
+        lines.append(f"👤 {user_mention}")
+
+    return "\n".join(lines)
+
+
+def build_upload_caption(
+    title: str,
+    filename: str,
+    size: Optional[str] = None,
+    user_mention: Optional[str] = None,
+    gofile_link: Optional[str] = None
+) -> str:
+    """
+    Build caption for user-uploaded files.
+
+    Args:
+        title: File title/name
+        filename: Original filename
+        size: Formatted file size
+        user_mention: User mention
+        gofile_link: Gofile link if uploaded there
+
+    Returns:
+        Formatted caption
+    """
+    lines = [f"📁 **{title}**", ""]
+
+    lines.append(f"**Filename:** `{filename}`")
+
+    if size:
+        lines.append(f"**Size:** `{size}`")
+
+    if gofile_link:
+        lines.append("")
+        lines.append(f"🔗 **Download:** [Gofile Link]({gofile_link})")
+
+    if user_mention:
+        lines.append("")
+        lines.append(f"👤 Uploaded by: {user_mention}")
+
+    return "\n".join(lines)

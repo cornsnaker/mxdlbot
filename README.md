@@ -13,6 +13,9 @@ A production-ready Telegram bot for downloading videos from MX Player with quali
 - **User Settings** - Configurable output format, custom thumbnails, Gofile API token
 - **Admin Panel** - Broadcast messages, view stats, ban/unban users
 - **MongoDB Storage** - Persistent user data and settings
+- **Show Browser** - Browse and batch download episodes from TV shows
+- **File Re-upload** - Upload your own video/document files with Gofile support
+- **Detailed Captions** - Rich captions with audio languages, quality, episode info
 
 ## Quick Start
 
@@ -119,7 +122,21 @@ Before downloading, users must authenticate with their MX Player cookies:
 3. Click "Start Download"
 4. Wait for download and upload to complete
 
-### 3. Settings
+### 3. Browsing TV Shows
+
+1. Send a show URL (not a specific episode)
+2. Browse available seasons
+3. Select episodes to download (tap to toggle)
+4. Use "Select All" for batch download
+5. Click "Download" to queue selected episodes
+
+### 4. Uploading Your Files
+
+- Send any video file (MP4, MKV, AVI, etc.)
+- Send documents for re-upload with Gofile support
+- Large files (>2GB) automatically go to Gofile.io
+
+### 5. Settings
 
 Use `/settings` to configure:
 
@@ -146,6 +163,8 @@ mxdlbot/
 │   ├── start.py        # /start, /help
 │   ├── auth.py         # /auth, cookie handling
 │   ├── download.py     # Link processing, quality selection
+│   ├── browse.py       # Show browser, episode selection
+│   ├── upload.py       # Video/document file uploads
 │   ├── settings.py     # User settings
 │   └── admin.py        # Admin commands
 │
