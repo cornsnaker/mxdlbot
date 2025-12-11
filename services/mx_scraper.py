@@ -175,6 +175,11 @@ class MXScraper:
             episode = item.get('episodeNumber')
             episode_title = item.get('name')
 
+        # Ensure title is a string
+        if isinstance(title, list):
+            title = title[0] if title else 'Unknown Title'
+        title = str(title) if title else 'Unknown Title'
+
         # Get image
         image = None
         imgs = item.get('image')
@@ -186,9 +191,21 @@ class MXScraper:
         # Get duration (ISO 8601 format like PT30M)
         duration = self._parse_duration(item.get('duration'))
 
+        # Get description - ensure it's a string
+        description = item.get('description', 'No description available.')
+        if isinstance(description, list):
+            description = description[0] if description else 'No description available.'
+        description = str(description) if description else 'No description available.'
+
+        # Ensure episode_title is a string
+        if isinstance(episode_title, list):
+            episode_title = episode_title[0] if episode_title else None
+        if episode_title:
+            episode_title = str(episode_title)
+
         return VideoMetadata(
             title=title,
-            description=item.get('description', 'No description available.'),
+            description=description,
             image=image,
             season=season,
             episode=episode,

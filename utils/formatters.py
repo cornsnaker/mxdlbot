@@ -118,6 +118,13 @@ def format_user_mention(user_id: int, first_name: str) -> str:
     Returns:
         Markdown mention format
     """
+    # Handle None or non-string first_name
+    if first_name is None:
+        first_name = "User"
+    elif isinstance(first_name, list):
+        first_name = first_name[0] if first_name else "User"
+    first_name = str(first_name)
+
     # Escape special characters in name
     safe_name = first_name.replace('[', '').replace(']', '')
     return f"[{safe_name}](tg://user?id={user_id})"
