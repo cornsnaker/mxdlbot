@@ -204,7 +204,8 @@ def build_detailed_caption(
     gofile_link: Optional[str] = None,
     audio_count: int = 0,
     subtitle_count: int = 0,
-    channel_tag: Optional[str] = None
+    channel_tag: Optional[str] = None,
+    mediainfo_link: Optional[str] = None
 ) -> str:
     """
     Build detailed caption with all video information.
@@ -236,6 +237,7 @@ def build_detailed_caption(
         audio_count: Number of audio tracks
         subtitle_count: Number of subtitle tracks
         channel_tag: Channel tag to display (e.g., "@THECIDANIME")
+        mediainfo_link: Telegraph link with detailed mediainfo
 
     Returns:
         Formatted caption string
@@ -250,7 +252,7 @@ def build_detailed_caption(
     if not is_movie and episode is not None:
         lines.append(f"◉ Episode: {episode}")
 
-    # Type label (audio and subtitles)
+    # Type label (audio and subtitles) with mediainfo link
     type_parts = []
     if audio_count >= 2:
         if audio_count == 2:
@@ -269,7 +271,11 @@ def build_detailed_caption(
             type_parts.append(f"(Multi-Subs)[{subtitle_count}]")
 
     if type_parts:
-        lines.append(f"◉ Type: {' '.join(type_parts)}")
+        type_text = ' '.join(type_parts)
+        if mediainfo_link:
+            lines.append(f"◉ Type: [{type_text}]({mediainfo_link})")
+        else:
+            lines.append(f"◉ Type: {type_text}")
 
     # Quality
     if quality:

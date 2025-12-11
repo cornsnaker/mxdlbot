@@ -25,6 +25,7 @@ from utils.progress import DownloadProgress, UploadProgress
 from utils.formatters import format_size, format_duration, format_user_mention
 from utils.notifications import Toast, build_final_message, build_detailed_caption
 from utils.mediainfo import extract_media_info
+from services.telegraph import create_telegraph_page
 
 
 # MX Player URL pattern
@@ -410,11 +411,26 @@ async def callback_start_download(client: Client, callback: CallbackQuery):
         # Rename the file if paths are different
         if result.file_path != new_file_path:
             try:
+                # Handle case where new path already exists
+                if os.path.exists(new_file_path):
+                    os.remove(new_file_path)
                 os.rename(result.file_path, new_file_path)
                 result.file_path = new_file_path
             except Exception as e:
                 print(f"[Download] Could not rename file: {e}")
                 # Continue with original filename if rename fails
+
+        # Create Telegraph page for mediainfo
+        mediainfo_link = None
+        if media_info and (audio_count > 0 or subtitle_count > 0):
+            try:
+                mediainfo_link = await create_telegraph_page(
+                    title=metadata_dict['title'],
+                    media_info=media_info,
+                    file_path=result.file_path
+                )
+            except Exception as e:
+                print(f"[Download] Telegraph error: {e}")
 
         # Build detailed caption with new format
         caption = build_detailed_caption(
@@ -427,7 +443,8 @@ async def callback_start_download(client: Client, callback: CallbackQuery):
             is_movie=metadata_dict['is_movie'],
             user_mention=format_user_mention(user_id, callback.from_user.first_name),
             audio_count=audio_count,
-            subtitle_count=subtitle_count
+            subtitle_count=subtitle_count,
+            mediainfo_link=mediainfo_link
         )
 
         # Upload
@@ -457,6 +474,7 @@ async def callback_start_download(client: Client, callback: CallbackQuery):
                     user_mention=format_user_mention(user_id, callback.from_user.first_name),
                     audio_count=audio_count,
                     subtitle_count=subtitle_count,
+                    mediainfo_link=mediainfo_link,
                     gofile_link=upload_result.gofile_link
                 )
                 await progress_msg.edit_text(final_text, disable_web_page_preview=True)
