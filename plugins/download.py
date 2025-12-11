@@ -5,8 +5,6 @@ Download handler for MX Player links with quality selection wizard.
 import os
 import re
 import asyncio
-import time
-import glob
 from pyrogram import Client, filters
 from pyrogram.types import (
     Message, CallbackQuery,
@@ -20,7 +18,7 @@ from config import (
 )
 from states import get_state, set_state, clear_state, UserStep
 from services.mx_scraper import mx_scraper, VideoMetadata, AudioTrack
-from services.downloader import downloader, sanitize_filename, generate_filename, get_video_duration
+from services.downloader import downloader, sanitize_filename, generate_filename, get_video_duration, clean_download_directory
 from services.uploader import Uploader
 from services.thumbnail import ThumbnailService
 from utils.progress import DownloadProgress, UploadProgress
@@ -357,24 +355,14 @@ async def callback_start_download(client: Client, callback: CallbackQuery):
 
     result = None
     thumb_path = None
-    original_file_path = None  # Track original path for cleanup
 
     try:
-        # Generate unique filename with timestamp to avoid conflicts
-        unique_id = int(time.time() * 1000)
+        # Generate filename
         filename = sanitize_filename(metadata_dict['title'])
         if not metadata_dict['is_movie'] and metadata_dict['season'] and metadata_dict['episode']:
             filename = f"{filename}_S{metadata_dict['season']:02d}E{metadata_dict['episode']:02d}"
-        filename = f"{filename}_{unique_id}"
 
-        # Clean up any existing files with similar names before download
-        for old_file in glob.glob(os.path.join(DOWNLOAD_DIR, f"*{unique_id}*")):
-            try:
-                os.remove(old_file)
-            except Exception:
-                pass
-
-        # Download
+        # Download (clean_download_directory is called inside downloader.download)
         result = await downloader.download(
             m3u8_url=metadata_dict['m3u8_url'],
             filename=filename,
@@ -410,9 +398,6 @@ async def callback_start_download(client: Client, callback: CallbackQuery):
         audio_count = len(media_info.audio_tracks) if media_info else 0
         subtitle_count = media_info.subtitle_count if media_info else 0
         quality_label = media_info.quality_label if media_info and media_info.height else (f"{resolution}p" if resolution and resolution != "best" else "Best")
-
-        # Store original path for cleanup
-        original_file_path = result.file_path
 
         # Generate clean filename with audio info and rename file
         clean_filename = generate_filename(
@@ -506,23 +491,6 @@ async def callback_start_download(client: Client, callback: CallbackQuery):
         # Cleanup
         clear_state(user_id)
 
-        # Remove downloaded file (current path after rename)
-        if result and result.file_path and os.path.exists(result.file_path):
-            try:
-                os.remove(result.file_path)
-                print(f"[Cleanup] Removed: {result.file_path}")
-            except Exception as e:
-                print(f"[Cleanup] Failed to remove {result.file_path}: {e}")
-
-        # Remove original file path (before rename) if different
-        if original_file_path and original_file_path != (result.file_path if result else None):
-            if os.path.exists(original_file_path):
-                try:
-                    os.remove(original_file_path)
-                    print(f"[Cleanup] Removed original: {original_file_path}")
-                except Exception as e:
-                    print(f"[Cleanup] Failed to remove original {original_file_path}: {e}")
-
         # Remove thumbnail
         if thumb_path and os.path.exists(thumb_path):
             try:
@@ -530,11 +498,5 @@ async def callback_start_download(client: Client, callback: CallbackQuery):
             except Exception:
                 pass
 
-        # Clean up any leftover files from this download session
-        if 'unique_id' in dir():
-            for leftover in glob.glob(os.path.join(DOWNLOAD_DIR, f"*{unique_id}*")):
-                try:
-                    os.remove(leftover)
-                    print(f"[Cleanup] Removed leftover: {leftover}")
-                except Exception:
-                    pass
+        # Clean up entire download directory to ensure no old files remain
+        clean_download_directory()

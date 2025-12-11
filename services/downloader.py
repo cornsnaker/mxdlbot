@@ -4,10 +4,25 @@ N_m3u8DL-RE downloader service with progress tracking.
 
 import os
 import re
+import glob
 import asyncio
 from typing import Optional, Callable, Tuple
 from dataclasses import dataclass
 from config import BINARY_PATH, DOWNLOAD_DIR
+
+
+def clean_download_directory():
+    """Remove all files from download directory."""
+    try:
+        for f in glob.glob(os.path.join(DOWNLOAD_DIR, "*")):
+            try:
+                if os.path.isfile(f):
+                    os.remove(f)
+                    print(f"[Cleanup] Removed: {f}")
+            except Exception as e:
+                print(f"[Cleanup] Failed to remove {f}: {e}")
+    except Exception as e:
+        print(f"[Cleanup] Directory cleanup error: {e}")
 
 
 @dataclass
@@ -83,6 +98,9 @@ class Downloader:
         Returns:
             DownloadResult with success status and file path
         """
+        # IMPORTANT: Clean download directory before starting
+        clean_download_directory()
+
         output_path = os.path.join(DOWNLOAD_DIR, filename)
 
         # Build command
@@ -107,8 +125,17 @@ class Downloader:
             await self._read_progress(progress_callback)
             await self.current_process.wait()
 
-            # Determine output file path
+            # Find the output file - N_m3u8DL-RE may use different naming
             final_path = f"{output_path}.{output_format}"
+
+            # If expected path doesn't exist, search for any video file
+            if not os.path.exists(final_path):
+                # Look for any file with the output format
+                found_files = glob.glob(os.path.join(DOWNLOAD_DIR, f"*.{output_format}"))
+                if found_files:
+                    # Get the most recently modified file
+                    final_path = max(found_files, key=os.path.getmtime)
+                    print(f"[Downloader] Found output file: {final_path}")
 
             if self.current_process.returncode == 0 and os.path.exists(final_path):
                 file_size = os.path.getsize(final_path)
@@ -118,6 +145,9 @@ class Downloader:
                     file_size=file_size
                 )
             else:
+                # List what files exist for debugging
+                existing = glob.glob(os.path.join(DOWNLOAD_DIR, "*"))
+                print(f"[Downloader] Files in download dir: {existing}")
                 return DownloadResult(
                     success=False,
                     file_path=None,
@@ -159,7 +189,8 @@ class Downloader:
             "--download-retry-count", "5",
             "-M", f"format={output_format}:muxer=ffmpeg",
             "-mt",  # Concurrent download
-            "--auto-select"
+            "--auto-select",
+            "--del-after-done"  # Clean up temp files
         ]
 
         # Add headers

@@ -43,7 +43,7 @@ async def create_telegraph_page(title: str, media_info: MediaInfo, file_path: st
                     return None
                 access_token = result["result"]["access_token"]
 
-            # Create page
+            # Create page using form data (Telegraph API requires this)
             create_page_url = "https://api.telegra.ph/createPage"
             page_data = {
                 "access_token": access_token,
@@ -53,12 +53,16 @@ async def create_telegraph_page(title: str, media_info: MediaInfo, file_path: st
                 "return_content": "false"
             }
 
-            async with session.post(create_page_url, json=page_data) as resp:
+            async with session.post(create_page_url, data=page_data) as resp:
                 if resp.status != 200:
+                    print(f"[Telegraph] Page creation failed: status {resp.status}")
                     return None
                 result = await resp.json()
+                print(f"[Telegraph] Page result: {result}")
                 if result.get("ok"):
                     return result["result"]["url"]
+                else:
+                    print(f"[Telegraph] Error: {result.get('error')}")
 
         return None
 
