@@ -205,6 +205,68 @@ class TelegramUploader:
             error="Max retries exceeded"
         )
 
+    async def upload_document(
+        self,
+        chat_id: int,
+        file_path: str,
+        caption: str = "",
+        thumb_path: Optional[str] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None
+    ) -> UploadResult:
+        """
+        Upload file as document to Telegram.
+
+        Args:
+            chat_id: Telegram chat ID
+            file_path: Path to file
+            caption: Document caption
+            thumb_path: Path to thumbnail
+            progress_callback: Callback(current, total) for progress
+
+        Returns:
+            UploadResult with success status
+        """
+        max_retries = 3
+
+        for attempt in range(max_retries):
+            try:
+                message = await self.client.send_document(
+                    chat_id=chat_id,
+                    document=file_path,
+                    caption=caption,
+                    thumb=thumb_path,
+                    progress=progress_callback
+                )
+
+                return UploadResult(
+                    success=True,
+                    platform="telegram",
+                    file_id=message.document.file_id if message.document else None
+                )
+
+            except FloodWait as e:
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(e.value)
+                else:
+                    return UploadResult(
+                        success=False,
+                        platform="telegram",
+                        error=f"FloodWait: {e.value}s"
+                    )
+
+            except Exception as e:
+                return UploadResult(
+                    success=False,
+                    platform="telegram",
+                    error=str(e)
+                )
+
+        return UploadResult(
+            success=False,
+            platform="telegram",
+            error="Max retries exceeded"
+        )
+
 
 class Uploader:
     """
@@ -223,6 +285,7 @@ class Uploader:
         thumb_path: Optional[str] = None,
         duration: Optional[int] = None,
         gofile_token: Optional[str] = None,
+        upload_mode: str = "video",
         progress_callback: Optional[Callable] = None,
         force_gofile: bool = False
     ) -> UploadResult:
@@ -238,6 +301,7 @@ class Uploader:
             thumb_path: Thumbnail path
             duration: Video duration
             gofile_token: User's Gofile API token
+            upload_mode: "video" or "document"
             progress_callback: Progress callback
             force_gofile: Force Gofile upload regardless of size
 
@@ -254,12 +318,21 @@ class Uploader:
                 progress_callback=progress_callback
             )
 
-        # Upload to Telegram
-        return await self.telegram.upload_video(
-            chat_id=chat_id,
-            file_path=file_path,
-            caption=caption,
-            thumb_path=thumb_path,
-            duration=duration,
-            progress_callback=progress_callback
-        )
+        # Upload to Telegram based on upload_mode
+        if upload_mode == "document":
+            return await self.telegram.upload_document(
+                chat_id=chat_id,
+                file_path=file_path,
+                caption=caption,
+                thumb_path=thumb_path,
+                progress_callback=progress_callback
+            )
+        else:
+            return await self.telegram.upload_video(
+                chat_id=chat_id,
+                file_path=file_path,
+                caption=caption,
+                thumb_path=thumb_path,
+                duration=duration,
+                progress_callback=progress_callback
+            )

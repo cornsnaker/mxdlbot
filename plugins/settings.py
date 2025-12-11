@@ -15,16 +15,21 @@ from states import get_state, set_state, clear_state, UserStep
 def build_settings_keyboard(settings: dict) -> InlineKeyboardMarkup:
     """Build settings menu keyboard."""
     output_format = settings.get('output_format', 'mp4')
+    upload_mode = settings.get('upload_mode', 'video')
     has_gofile = bool(settings.get('gofile_token'))
     has_thumbnail = bool(settings.get('custom_thumbnail'))
 
     format_text = f"📦 Format: {output_format.upper()}"
+    upload_text = f"📤 Upload As: {upload_mode.capitalize()}"
     gofile_text = "🔑 Gofile: " + ("Set" if has_gofile else "Not Set")
     thumb_text = "🖼️ Thumbnail: " + ("Custom" if has_thumbnail else "Default")
 
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(format_text, callback_data="settings_format")
+        ],
+        [
+            InlineKeyboardButton(upload_text, callback_data="settings_upload_mode")
         ],
         [
             InlineKeyboardButton(gofile_text, callback_data="settings_gofile")
@@ -47,6 +52,22 @@ def build_format_keyboard(current: str) -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(f"MP4{mp4_check}", callback_data="set_format:mp4"),
             InlineKeyboardButton(f"MKV{mkv_check}", callback_data="set_format:mkv")
+        ],
+        [
+            InlineKeyboardButton("⬅️ Back", callback_data="settings_back")
+        ]
+    ])
+
+
+def build_upload_mode_keyboard(current: str) -> InlineKeyboardMarkup:
+    """Build upload mode selection keyboard."""
+    video_check = " ✓" if current == "video" else ""
+    document_check = " ✓" if current == "document" else ""
+
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(f"🎬 Video{video_check}", callback_data="set_upload_mode:video"),
+            InlineKeyboardButton(f"📄 Document{document_check}", callback_data="set_upload_mode:document")
         ],
         [
             InlineKeyboardButton("⬅️ Back", callback_data="settings_back")
@@ -108,6 +129,7 @@ async def cmd_settings(client: Client, message: Message):
 Configure your preferences below.
 
 **Output Format:** Video container format
+**Upload As:** Send as Video or Document
 **Gofile Token:** For large file uploads (>2GB)
 **Thumbnail:** Custom thumbnail for uploads"""
 
@@ -127,6 +149,7 @@ async def callback_open_settings(client: Client, callback: CallbackQuery):
 Configure your preferences below.
 
 **Output Format:** Video container format
+**Upload As:** Send as Video or Document
 **Gofile Token:** For large file uploads (>2GB)
 **Thumbnail:** Custom thumbnail for uploads"""
 
@@ -174,6 +197,46 @@ async def callback_set_format(client: Client, callback: CallbackQuery):
 
     await callback.message.edit_reply_markup(reply_markup=keyboard)
     await callback.answer(f"Format set to {new_format.upper()}")
+
+
+@Client.on_callback_query(filters.regex("^settings_upload_mode$"))
+@authorized
+async def callback_upload_mode_menu(client: Client, callback: CallbackQuery):
+    """Show upload mode selection menu."""
+    user_id = callback.from_user.id
+    settings = await db.get_user_settings(user_id)
+    current = settings.get('upload_mode', 'video')
+
+    text = """**Upload Mode**
+
+Choose how files are sent to Telegram:
+
+**Video** - Plays in Telegram, shows thumbnail and duration
+**Document** - Downloads as file, preserves original filename"""
+
+    keyboard = build_upload_mode_keyboard(current)
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^set_upload_mode:(.+)$"))
+@authorized
+async def callback_set_upload_mode(client: Client, callback: CallbackQuery):
+    """Set upload mode."""
+    user_id = callback.from_user.id
+    new_mode = callback.matches[0].group(1)
+
+    if new_mode not in ['video', 'document']:
+        await callback.answer("Invalid mode", show_alert=True)
+        return
+
+    await db.set_upload_mode(user_id, new_mode)
+
+    # Show updated menu
+    keyboard = build_upload_mode_keyboard(new_mode)
+
+    await callback.message.edit_reply_markup(reply_markup=keyboard)
+    await callback.answer(f"Upload mode set to {new_mode.capitalize()}")
 
 
 @Client.on_callback_query(filters.regex("^settings_gofile$"))
@@ -309,6 +372,7 @@ async def callback_settings_back(client: Client, callback: CallbackQuery):
 Configure your preferences below.
 
 **Output Format:** Video container format
+**Upload As:** Send as Video or Document
 **Gofile Token:** For large file uploads (>2GB)
 **Thumbnail:** Custom thumbnail for uploads"""
 

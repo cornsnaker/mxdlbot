@@ -17,3 +17,6 @@ motor>=3.3.0
 
 # Environment variable loading
 python-dotenv>=1.0.0
+
+# Media info extraction
+pymediainfo>=6.0.1

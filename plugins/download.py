@@ -24,6 +24,7 @@ from services.thumbnail import ThumbnailService
 from utils.progress import DownloadProgress, UploadProgress
 from utils.formatters import format_size, format_duration, format_user_mention
 from utils.notifications import Toast, build_final_message, build_detailed_caption
+from utils.mediainfo import extract_media_info
 
 
 # MX Player URL pattern
@@ -325,6 +326,7 @@ async def callback_start_download(client: Client, callback: CallbackQuery):
     # Get user settings
     settings = await db.get_user_settings(user_id)
     output_format = settings.get('output_format', 'mp4')
+    upload_mode = settings.get('upload_mode', 'video')
     gofile_token = settings.get('gofile_token')
     custom_thumbnail = settings.get('custom_thumbnail')
 
@@ -390,26 +392,24 @@ async def callback_start_download(client: Client, callback: CallbackQuery):
             filename=filename
         )
 
-        # Get audio language names
-        audio_languages = [t['name'] for t in metadata_dict.get('audio_tracks', [])]
+        # Extract media info using pymediainfo
+        media_info = extract_media_info(result.file_path)
+        audio_count = len(media_info.audio_tracks) if media_info else 0
+        subtitle_count = media_info.subtitle_count if media_info else 0
+        quality_label = media_info.quality_label if media_info and media_info.height else (f"{resolution}p" if resolution and resolution != "best" else "Best")
 
-        # Build detailed caption
+        # Build detailed caption with new format
         caption = build_detailed_caption(
             title=metadata_dict['title'],
             show_title=metadata_dict['title'] if not metadata_dict['is_movie'] else None,
             season=metadata_dict.get('season'),
             episode=metadata_dict.get('episode'),
             episode_title=metadata_dict.get('episode_title'),
-            duration=format_duration(duration) if duration else None,
-            size=format_size(result.file_size),
-            quality=f"{resolution}p" if resolution and resolution != "best" else "Best",
-            audio_languages=audio_languages if audio_languages else ["All available"],
-            description=metadata_dict.get('description'),
-            genres=metadata_dict.get('genres'),
-            release_year=metadata_dict.get('release_year'),
-            rating=metadata_dict.get('rating'),
+            quality=quality_label,
             is_movie=metadata_dict['is_movie'],
-            user_mention=format_user_mention(user_id, callback.from_user.first_name)
+            user_mention=format_user_mention(user_id, callback.from_user.first_name),
+            audio_count=audio_count,
+            subtitle_count=subtitle_count
         )
 
         # Upload
@@ -421,6 +421,7 @@ async def callback_start_download(client: Client, callback: CallbackQuery):
             thumb_path=thumb_path,
             duration=duration,
             gofile_token=gofile_token,
+            upload_mode=upload_mode,
             progress_callback=upload_progress.callback
         )
 
@@ -433,12 +434,11 @@ async def callback_start_download(client: Client, callback: CallbackQuery):
                     season=metadata_dict.get('season'),
                     episode=metadata_dict.get('episode'),
                     episode_title=metadata_dict.get('episode_title'),
-                    duration=format_duration(duration) if duration else None,
-                    size=format_size(result.file_size),
-                    quality=f"{resolution}p" if resolution and resolution != "best" else "Best",
-                    audio_languages=audio_languages if audio_languages else ["All available"],
+                    quality=quality_label,
                     is_movie=metadata_dict['is_movie'],
                     user_mention=format_user_mention(user_id, callback.from_user.first_name),
+                    audio_count=audio_count,
+                    subtitle_count=subtitle_count,
                     gofile_link=upload_result.gofile_link
                 )
                 await progress_msg.edit_text(final_text, disable_web_page_preview=True)

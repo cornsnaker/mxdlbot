@@ -71,6 +71,7 @@ class Database:
                 "last_active": datetime.utcnow(),
                 "settings": {
                     "output_format": "mp4",  # mp4 or mkv
+                    "upload_mode": "video",  # video or document
                     "gofile_token": None,
                     "custom_thumbnail": None
                 }
@@ -103,13 +104,18 @@ class Database:
         Get user settings with defaults.
 
         Returns:
-            Settings dict with output_format, gofile_token, custom_thumbnail
+            Settings dict with output_format, upload_mode, gofile_token, custom_thumbnail
         """
         user = await self.get_user(user_id)
         if user and "settings" in user:
-            return user["settings"]
+            settings = user["settings"]
+            # Ensure upload_mode has a default for existing users
+            if "upload_mode" not in settings:
+                settings["upload_mode"] = "video"
+            return settings
         return {
             "output_format": "mp4",
+            "upload_mode": "video",
             "gofile_token": None,
             "custom_thumbnail": None
         }
@@ -130,6 +136,28 @@ class Database:
             {"$set": {"settings.output_format": format}}
         )
         return result.modified_count > 0
+
+    async def set_upload_mode(self, user_id: int, mode: str) -> bool:
+        """
+        Set user's preferred upload mode.
+
+        Args:
+            user_id: Telegram user ID
+            mode: 'video' or 'document'
+        """
+        if mode not in ["video", "document"]:
+            return False
+
+        result = await self.db.users.update_one(
+            {"user_id": user_id},
+            {"$set": {"settings.upload_mode": mode}}
+        )
+        return result.modified_count > 0
+
+    async def get_upload_mode(self, user_id: int) -> str:
+        """Get user's upload mode (video or document)."""
+        settings = await self.get_user_settings(user_id)
+        return settings.get("upload_mode", "video")
 
     async def set_gofile_token(self, user_id: int, token: str) -> bool:
         """Set user's Gofile API token."""

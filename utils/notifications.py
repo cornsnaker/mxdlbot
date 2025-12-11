@@ -201,10 +201,114 @@ def build_detailed_caption(
     rating: Optional[str] = None,
     is_movie: bool = False,
     user_mention: Optional[str] = None,
-    gofile_link: Optional[str] = None
+    gofile_link: Optional[str] = None,
+    audio_count: int = 0,
+    subtitle_count: int = 0,
+    channel_tag: Optional[str] = None
 ) -> str:
     """
     Build detailed caption with all video information.
+
+    New format:
+    ◉ Title: Show Name
+    ◉ Episode: 10
+    ◉ Type: (Tri-Audio) (Multi-Subs)[3]
+    🌟: [1080p]
+    🔗 @CHANNEL
+
+    Args:
+        title: Video/Episode title
+        show_title: Show title (for episodes)
+        season: Season number
+        episode: Episode number
+        episode_title: Episode title
+        duration: Formatted duration
+        size: Formatted file size
+        quality: Video quality (e.g., "1080p")
+        audio_languages: List of audio language names
+        description: Video description
+        genres: List of genres
+        release_year: Release year
+        rating: Content rating
+        is_movie: True if movie, False if episode
+        user_mention: Markdown user mention
+        gofile_link: Gofile download link (if uploaded there)
+        audio_count: Number of audio tracks
+        subtitle_count: Number of subtitle tracks
+        channel_tag: Channel tag to display (e.g., "@THECIDANIME")
+
+    Returns:
+        Formatted caption string
+    """
+    lines = []
+
+    # Title
+    display_title = show_title or title
+    lines.append(f"◉ Title: {display_title}")
+
+    # Episode info
+    if not is_movie and episode is not None:
+        lines.append(f"◉ Episode: {episode}")
+
+    # Type label (audio and subtitles)
+    type_parts = []
+    if audio_count >= 2:
+        if audio_count == 2:
+            type_parts.append("(Dual-Audio)")
+        elif audio_count == 3:
+            type_parts.append("(Tri-Audio)")
+        elif audio_count == 4:
+            type_parts.append("(Quad-Audio)")
+        else:
+            type_parts.append(f"({audio_count}-Audio)")
+
+    if subtitle_count > 0:
+        if subtitle_count == 1:
+            type_parts.append("(Subs)")
+        else:
+            type_parts.append(f"(Multi-Subs)[{subtitle_count}]")
+
+    if type_parts:
+        lines.append(f"◉ Type: {' '.join(type_parts)}")
+
+    # Quality
+    if quality:
+        lines.append(f"🌟: [{quality}]")
+
+    # Channel tag or user mention
+    if channel_tag:
+        lines.append(f"🔗 {channel_tag}")
+    elif user_mention:
+        lines.append(f"🔗 {user_mention}")
+
+    # Gofile link if applicable
+    if gofile_link:
+        lines.append("")
+        lines.append(f"📁 Download: {gofile_link}")
+
+    return "\n".join(lines)
+
+
+def build_detailed_caption_full(
+    title: str,
+    show_title: Optional[str] = None,
+    season: Optional[int] = None,
+    episode: Optional[int] = None,
+    episode_title: Optional[str] = None,
+    duration: Optional[str] = None,
+    size: Optional[str] = None,
+    quality: Optional[str] = None,
+    audio_languages: Optional[list] = None,
+    description: Optional[str] = None,
+    genres: Optional[list] = None,
+    release_year: Optional[int] = None,
+    rating: Optional[str] = None,
+    is_movie: bool = False,
+    user_mention: Optional[str] = None,
+    gofile_link: Optional[str] = None
+) -> str:
+    """
+    Build detailed caption with all video information (full format).
 
     Args:
         title: Video/Episode title
