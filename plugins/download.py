@@ -23,7 +23,7 @@ from services.downloader import downloader, sanitize_filename, generate_filename
 from services.uploader import Uploader
 from services.thumbnail import ThumbnailService
 from services.queue import download_queue, QueueItem, QueueItemStatus
-from utils.progress import DownloadProgress, UploadProgress
+from utils.progress import DownloadProgress, UploadProgress, status_manager
 from utils.formatters import format_size, format_duration, format_user_mention
 from utils.notifications import Toast, build_final_message, build_detailed_caption
 from utils.mediainfo import extract_media_info
@@ -159,8 +159,30 @@ async def process_queue_item(item: QueueItem) -> None:
 
     item.progress_message_id = progress_msg.id
 
-    download_progress = DownloadProgress(progress_msg)
-    upload_progress = UploadProgress(progress_msg)
+    # Create enhanced progress trackers with task info
+    download_progress = DownloadProgress(
+        progress_msg,
+        task_id=item.id,
+        title=metadata_dict['title'],
+        user_name=item.user_name,
+        user_id=user_id
+    )
+    upload_progress = UploadProgress(
+        progress_msg,
+        task_id=item.id,
+        title=metadata_dict['title'],
+        user_name=item.user_name,
+        user_id=user_id
+    )
+
+    # Register task in global status manager
+    await status_manager.register_task(
+        task_id=item.id,
+        title=metadata_dict['title'],
+        user_name=item.user_name,
+        user_id=user_id,
+        status="Download"
+    )
 
     result = None
     thumb_path = None
@@ -189,6 +211,7 @@ async def process_queue_item(item: QueueItem) -> None:
 
         # Update status to uploading
         item.status = QueueItemStatus.UPLOADING
+        await status_manager.update_task(item.id, status="Upload")
         await progress_msg.edit_text(f"⬆️ **Preparing upload...**\n\n{metadata_dict['title']}")
 
         # Get video duration
@@ -302,6 +325,9 @@ async def process_queue_item(item: QueueItem) -> None:
             pass
 
     finally:
+        # Remove from status manager
+        await status_manager.remove_task(item.id)
+
         # Cleanup
         clear_state(user_id)
 
@@ -680,3 +706,22 @@ async def cmd_cancel_task(client: Client, message: Message):
         await message.reply_text(f"✅ **Task Cancelled**\n\n{result_message}")
     else:
         await message.reply_text(f"❌ **Cannot Cancel**\n\n{result_message}")
+
+
+@Client.on_message(filters.command("status") & filters.private)
+@authorized
+async def cmd_status(client: Client, message: Message):
+    """Show global status page with all active downloads."""
+    # Parse page number from command
+    parts = message.text.split()
+    page = 1
+    if len(parts) > 1:
+        try:
+            page = int(parts[1])
+        except ValueError:
+            page = 1
+
+    # Get formatted status page
+    status_text, total_pages = status_manager.format_status_page(page)
+
+    await message.reply_text(status_text)

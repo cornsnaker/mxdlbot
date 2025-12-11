@@ -117,6 +117,7 @@ ADMINS=111111,222222
 | `/settings` | Configure output format, upload mode, thumbnail, Gofile token |
 | `/cancel` | Cancel current operation |
 | `/queue` | View your download queue status with task IDs |
+| `/status` | View all active downloads (paginated) |
 | `/canceltask <ID>` | Cancel a specific task by ID (e.g., `/canceltask DL-A3X9`) |
 | `/cancelqueue` | Cancel all pending downloads in your queue |
 

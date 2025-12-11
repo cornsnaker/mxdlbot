@@ -26,7 +26,8 @@ Send me an MX Player link (Episode or Movie) and I'll download it for you.
 /start - Show this message
 /auth - Upload your cookies.txt
 /settings - Configure your preferences
-/queue - View download queue
+/queue - View your download queue
+/status - View all active downloads
 /canceltask - Cancel a task by ID
 /help - Show help information
 """
