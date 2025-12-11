@@ -50,7 +50,7 @@ class GofileUploader:
         self,
         file_path: str,
         token: Optional[str] = None,
-        progress_callback: Optional[Callable[[float], None]] = None
+        progress_callback: Optional[Callable[[int, int], None]] = None
     ) -> UploadResult:
         """
         Upload file to Gofile.io.
@@ -58,7 +58,7 @@ class GofileUploader:
         Args:
             file_path: Path to file
             token: User's Gofile API token (optional)
-            progress_callback: Callback for upload progress
+            progress_callback: Callback(current, total) for upload progress
 
         Returns:
             UploadResult with success status and download link
@@ -76,7 +76,6 @@ class GofileUploader:
         try:
             file_size = os.path.getsize(file_path)
             uploaded = 0
-            start_time = time.time()
 
             # Create form data with file
             data = aiohttp.FormData()
@@ -96,8 +95,8 @@ class GofileUploader:
                             break
                         uploaded += len(chunk)
                         if progress_callback:
-                            percent = (uploaded / file_size) * 100
-                            await progress_callback(percent)
+                            # Pass current and total bytes (same format as Pyrogram)
+                            await progress_callback(uploaded, file_size)
                         yield chunk
 
             data.add_field(
