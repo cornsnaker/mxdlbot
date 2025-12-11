@@ -18,7 +18,7 @@ from config import (
 )
 from states import get_state, set_state, clear_state, UserStep
 from services.mx_scraper import mx_scraper, VideoMetadata, AudioTrack
-from services.downloader import downloader, sanitize_filename, get_video_duration
+from services.downloader import downloader, sanitize_filename, generate_filename, get_video_duration
 from services.uploader import Uploader
 from services.thumbnail import ThumbnailService
 from utils.progress import DownloadProgress, UploadProgress
@@ -397,6 +397,24 @@ async def callback_start_download(client: Client, callback: CallbackQuery):
         audio_count = len(media_info.audio_tracks) if media_info else 0
         subtitle_count = media_info.subtitle_count if media_info else 0
         quality_label = media_info.quality_label if media_info and media_info.height else (f"{resolution}p" if resolution and resolution != "best" else "Best")
+
+        # Generate clean filename with audio info and rename file
+        clean_filename = generate_filename(
+            title=metadata_dict['title'],
+            audio_count=audio_count,
+            season=metadata_dict.get('season') if not metadata_dict['is_movie'] else None,
+            episode=metadata_dict.get('episode') if not metadata_dict['is_movie'] else None
+        )
+        new_file_path = os.path.join(DOWNLOAD_DIR, f"{clean_filename}.{output_format}")
+
+        # Rename the file if paths are different
+        if result.file_path != new_file_path:
+            try:
+                os.rename(result.file_path, new_file_path)
+                result.file_path = new_file_path
+            except Exception as e:
+                print(f"[Download] Could not rename file: {e}")
+                # Continue with original filename if rename fails
 
         # Build detailed caption with new format
         caption = build_detailed_caption(

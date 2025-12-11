@@ -248,12 +248,60 @@ async def get_video_duration(file_path: str) -> Optional[int]:
 
 
 def sanitize_filename(name: str) -> str:
-    """Sanitize string for use as filename."""
-    # Replace problematic characters
-    name = re.sub(r'[<>:"/\\|?*]', '', name)
-    name = re.sub(r'[^\w\s\-\.]', '_', name)
-    name = re.sub(r'\s+', '_', name)
+    """
+    Sanitize string for use as filename.
+    Keeps the title readable while removing only truly problematic characters.
+    """
+    # Remove characters not allowed in filenames
+    # Keep: letters, numbers, spaces, hyphens, underscores, dots, colons (for titles like "Movie: Subtitle")
+    name = re.sub(r'[<>"/\\|?*]', '', name)
+
+    # Replace colon with a dash or keep it based on context
+    # "Movie: Subtitle" -> "Movie - Subtitle"
+    name = re.sub(r'\s*:\s*', ' - ', name)
+
+    # Remove any other special characters but keep basic punctuation
+    name = re.sub(r'[^\w\s\-\.\(\)]', '', name)
+
+    # Normalize whitespace
+    name = re.sub(r'\s+', ' ', name).strip()
+
     return name[:200]  # Limit length
+
+
+def generate_filename(title: str, audio_count: int = 0, season: int = None, episode: int = None) -> str:
+    """
+    Generate a clean filename with audio info.
+
+    Args:
+        title: Video title
+        audio_count: Number of audio tracks
+        season: Season number (for episodes)
+        episode: Episode number (for episodes)
+
+    Returns:
+        Clean filename like "Movie Name (Dual)" or "Show Name S01E05 (Tri-Audio)"
+    """
+    # Sanitize the title
+    clean_title = sanitize_filename(title)
+
+    # Add season/episode info for TV shows
+    if season is not None and episode is not None:
+        clean_title = f"{clean_title} S{season:02d}E{episode:02d}"
+
+    # Add audio info
+    if audio_count >= 2:
+        if audio_count == 2:
+            audio_tag = "(Dual)"
+        elif audio_count == 3:
+            audio_tag = "(Tri-Audio)"
+        elif audio_count == 4:
+            audio_tag = "(Quad-Audio)"
+        else:
+            audio_tag = f"({audio_count}-Audio)"
+        clean_title = f"{clean_title} {audio_tag}"
+
+    return clean_title
 
 
 # Global downloader instance
