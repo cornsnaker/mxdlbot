@@ -19,12 +19,15 @@ Send me an MX Player link (Episode or Movie) and I'll download it for you.
 - All audio languages included
 - Real-time progress tracking
 - Fast uploads with thumbnail
-- Custom settings & thumbnails
+- Download queue (max 2 concurrent)
+- MediaInfo with Telegraph links
 
 **Commands:**
 /start - Show this message
 /auth - Upload your cookies.txt
 /settings - Configure your preferences
+/queue - View download queue
+/canceltask - Cancel a task by ID
 /help - Show help information
 """
 
@@ -46,9 +49,17 @@ All audio languages are automatically included.
 The bot will download and upload the video to you.
 Large files (>2GB) are uploaded to Gofile.io.
 
+**Download Queue:**
+- Max 2 concurrent downloads per user
+- Additional downloads are queued automatically
+- Use /queue to view your queue status with task IDs
+- Use `/canceltask DL-XXXX` to cancel a specific task
+- Use /cancelqueue to cancel all pending downloads
+
 **Settings:**
 Use /settings to:
 - Change output format (MP4/MKV)
+- Choose upload mode (Video/Document)
 - Set your Gofile API token
 - Upload custom thumbnail
 

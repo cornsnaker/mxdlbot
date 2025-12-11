@@ -282,7 +282,18 @@ def sanitize_filename(name: str) -> str:
     """
     Sanitize string for use as filename.
     Keeps the title readable while removing only truly problematic characters.
+    Also handles URL-encoded names from m3u8 metadata.
     """
+    from urllib.parse import unquote
+
+    # First, decode any URL-encoded characters (like %20 for space)
+    name = unquote(name)
+
+    # Remove common URL artifacts and m3u8 metadata patterns
+    # Pattern: "language - en-IN value - " or similar
+    name = re.sub(r'^language\s*[-_]\s*\w+[-_]\w*\s*value\s*[-_]\s*', '', name, flags=re.IGNORECASE)
+    name = re.sub(r'^_?language[-_]\w+[-_]value[-_]', '', name, flags=re.IGNORECASE)
+
     # Remove characters not allowed in filenames
     # Keep: letters, numbers, spaces, hyphens, underscores, dots, colons (for titles like "Movie: Subtitle")
     name = re.sub(r'[<>"/\\|?*]', '', name)
@@ -294,8 +305,11 @@ def sanitize_filename(name: str) -> str:
     # Remove any other special characters but keep basic punctuation
     name = re.sub(r'[^\w\s\-\.\(\)]', '', name)
 
-    # Normalize whitespace
-    name = re.sub(r'\s+', ' ', name).strip()
+    # Remove leading/trailing underscores and dashes
+    name = name.strip('_- ')
+
+    # Normalize whitespace and underscores to spaces
+    name = re.sub(r'[_\s]+', ' ', name).strip()
 
     return name[:200]  # Limit length
 

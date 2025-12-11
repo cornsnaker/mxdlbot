@@ -1,5 +1,6 @@
 """
-Download handler for MX Player links with quality selection wizard.
+Download handler for MX Player links with quality selection wizard and queue system.
+Supports max 2 concurrent downloads per user with queue management.
 """
 
 import os
@@ -21,6 +22,7 @@ from services.mx_scraper import mx_scraper, VideoMetadata, AudioTrack
 from services.downloader import downloader, sanitize_filename, generate_filename, get_video_duration, clean_download_directory
 from services.uploader import Uploader
 from services.thumbnail import ThumbnailService
+from services.queue import download_queue, QueueItem, QueueItemStatus
 from utils.progress import DownloadProgress, UploadProgress
 from utils.formatters import format_size, format_duration, format_user_mention
 from utils.notifications import Toast, build_final_message, build_detailed_caption
@@ -30,6 +32,9 @@ from services.telegraph import create_telegraph_page
 
 # MX Player URL pattern
 MX_PATTERN = re.compile(r'https?://[^\s]*mxplayer\.in[^\s]*')
+
+# Store client reference for queue processing
+_client: Client = None
 
 
 def build_resolution_keyboard(resolutions: list) -> InlineKeyboardMarkup:
@@ -101,10 +106,227 @@ def format_metadata_caption(metadata: VideoMetadata, step: str = None) -> str:
     return "\n".join(lines)
 
 
-@Client.on_message(filters.text & filters.private & ~filters.command(["start", "help", "auth", "settings", "cancel", "broadcast", "stats", "ban", "unban", "banlist", "users", "addadmin", "removeadmin", "admins"]))
+def format_queue_status(user_id: int) -> str:
+    """Format queue status message for user with task IDs."""
+    status = download_queue.get_user_queue_status(user_id)
+
+    lines = ["📊 **Your Queue Status**", ""]
+
+    if status["active_count"] > 0:
+        lines.append(f"🔄 **Active Downloads:** {status['active_count']}/{download_queue.MAX_CONCURRENT_PER_USER}")
+        for item in status["active_items"]:
+            lines.append(f"  `{item['id']}` - {item['title'][:35]}... ({item['status']})")
+
+    if status["pending_count"] > 0:
+        lines.append("")
+        lines.append(f"⏳ **Queued:** {status['pending_count']}")
+        for item in status["pending_items"]:
+            lines.append(f"  `{item['id']}` - #{item['position']}: {item['title'][:35]}...")
+        lines.append("")
+        lines.append("💡 Cancel with: `/canceltask DL-XXXX`")
+
+    if status["active_count"] == 0 and status["pending_count"] == 0:
+        lines.append("No active or queued downloads.")
+
+    return "\n".join(lines)
+
+
+async def process_queue_item(item: QueueItem) -> None:
+    """
+    Process a single queue item (called by queue worker).
+
+    Args:
+        item: The QueueItem to process
+    """
+    global _client
+
+    if not _client:
+        print("[Queue] No client available for processing")
+        item.status = QueueItemStatus.FAILED
+        item.error = "Bot not ready"
+        return
+
+    client = _client
+    metadata_dict = item.metadata
+    user_id = item.user_id
+    chat_id = item.chat_id
+
+    # Create progress message
+    progress_msg = await client.send_message(
+        chat_id=chat_id,
+        text=f"⬇️ **Starting download...**\n\n{metadata_dict['title']}"
+    )
+
+    item.progress_message_id = progress_msg.id
+
+    download_progress = DownloadProgress(progress_msg)
+    upload_progress = UploadProgress(progress_msg)
+
+    result = None
+    thumb_path = None
+
+    try:
+        # Generate filename
+        filename = sanitize_filename(metadata_dict['title'])
+        if not metadata_dict['is_movie'] and metadata_dict.get('season') and metadata_dict.get('episode'):
+            filename = f"{filename}_S{metadata_dict['season']:02d}E{metadata_dict['episode']:02d}"
+
+        # Download (clean_download_directory is called inside downloader.download)
+        result = await downloader.download(
+            m3u8_url=metadata_dict['m3u8_url'],
+            filename=filename,
+            cookies_path=item.cookies_path,
+            resolution=item.resolution if item.resolution != "best" else None,
+            output_format=item.output_format,
+            progress_callback=download_progress.callback
+        )
+
+        if not result.success:
+            await progress_msg.edit_text(f"❌ **Download failed**\n\n{result.error or 'Unknown error'}")
+            item.status = QueueItemStatus.FAILED
+            item.error = result.error
+            return
+
+        # Update status to uploading
+        item.status = QueueItemStatus.UPLOADING
+        await progress_msg.edit_text(f"⬆️ **Preparing upload...**\n\n{metadata_dict['title']}")
+
+        # Get video duration
+        duration = await get_video_duration(result.file_path) or metadata_dict.get('duration')
+
+        # Get thumbnail
+        thumb_service = ThumbnailService(client)
+        thumb_path = await thumb_service.get_thumbnail(
+            user_id=user_id,
+            custom_file_id=item.custom_thumbnail,
+            fallback_url=metadata_dict.get('image'),
+            filename=filename
+        )
+
+        # Extract media info using pymediainfo
+        media_info = extract_media_info(result.file_path)
+        audio_count = len(media_info.audio_tracks) if media_info else 0
+        subtitle_count = media_info.subtitle_count if media_info else 0
+        quality_label = media_info.quality_label if media_info and media_info.height else (f"{item.resolution}p" if item.resolution and item.resolution != "best" else "Best")
+
+        # Generate clean filename with audio info and rename file
+        clean_filename = generate_filename(
+            title=metadata_dict['title'],
+            audio_count=audio_count,
+            season=metadata_dict.get('season') if not metadata_dict['is_movie'] else None,
+            episode=metadata_dict.get('episode') if not metadata_dict['is_movie'] else None
+        )
+        new_file_path = os.path.join(DOWNLOAD_DIR, f"{clean_filename}.{item.output_format}")
+
+        # Rename the file if paths are different
+        if result.file_path != new_file_path:
+            try:
+                if os.path.exists(new_file_path):
+                    os.remove(new_file_path)
+                os.rename(result.file_path, new_file_path)
+                result.file_path = new_file_path
+            except Exception as e:
+                print(f"[Download] Could not rename file: {e}")
+
+        # Create Telegraph page for mediainfo
+        mediainfo_link = None
+        if media_info and (audio_count > 0 or subtitle_count > 0):
+            try:
+                mediainfo_link = await create_telegraph_page(
+                    title=metadata_dict['title'],
+                    media_info=media_info,
+                    file_path=result.file_path
+                )
+            except Exception as e:
+                print(f"[Download] Telegraph error: {e}")
+
+        # Build detailed caption
+        caption = build_detailed_caption(
+            title=metadata_dict['title'],
+            show_title=metadata_dict['title'] if not metadata_dict['is_movie'] else None,
+            season=metadata_dict.get('season'),
+            episode=metadata_dict.get('episode'),
+            episode_title=metadata_dict.get('episode_title'),
+            quality=quality_label,
+            is_movie=metadata_dict['is_movie'],
+            user_mention=format_user_mention(user_id, item.user_name),
+            audio_count=audio_count,
+            subtitle_count=subtitle_count,
+            mediainfo_link=mediainfo_link
+        )
+
+        # Upload
+        uploader = Uploader(client)
+        upload_result = await uploader.upload(
+            chat_id=chat_id,
+            file_path=result.file_path,
+            caption=caption,
+            thumb_path=thumb_path,
+            duration=duration,
+            gofile_token=item.gofile_token,
+            upload_mode=item.upload_mode,
+            progress_callback=upload_progress.callback
+        )
+
+        if upload_result.success:
+            item.status = QueueItemStatus.COMPLETED
+            if upload_result.platform == "gofile":
+                final_text = build_detailed_caption(
+                    title=metadata_dict['title'],
+                    show_title=metadata_dict['title'] if not metadata_dict['is_movie'] else None,
+                    season=metadata_dict.get('season'),
+                    episode=metadata_dict.get('episode'),
+                    episode_title=metadata_dict.get('episode_title'),
+                    quality=quality_label,
+                    is_movie=metadata_dict['is_movie'],
+                    user_mention=format_user_mention(user_id, item.user_name),
+                    audio_count=audio_count,
+                    subtitle_count=subtitle_count,
+                    mediainfo_link=mediainfo_link,
+                    gofile_link=upload_result.gofile_link
+                )
+                await progress_msg.edit_text(final_text, disable_web_page_preview=True)
+            else:
+                await progress_msg.delete()
+        else:
+            item.status = QueueItemStatus.FAILED
+            item.error = upload_result.error
+            await progress_msg.edit_text(f"❌ **Upload failed**\n\n{upload_result.error or 'Unknown error'}")
+
+    except Exception as e:
+        item.status = QueueItemStatus.FAILED
+        item.error = str(e)
+        try:
+            await progress_msg.edit_text(f"❌ **Error**\n\n{str(e)[:200]}")
+        except Exception:
+            pass
+
+    finally:
+        # Cleanup
+        clear_state(user_id)
+
+        # Remove thumbnail
+        if thumb_path and os.path.exists(thumb_path):
+            try:
+                os.remove(thumb_path)
+            except Exception:
+                pass
+
+        # Clean up entire download directory
+        clean_download_directory()
+
+
+# Initialize queue with download handler
+download_queue.set_download_handler(process_queue_item)
+
+
+@Client.on_message(filters.text & filters.private & ~filters.command(["start", "help", "auth", "settings", "cancel", "broadcast", "stats", "ban", "unban", "banlist", "users", "addadmin", "removeadmin", "admins", "queue"]))
 @authorized
 async def handle_link(client: Client, message: Message):
     """Handle MX Player link messages."""
+    global _client
+    _client = client
+
     user_id = message.from_user.id
     text = message.text
 
@@ -124,7 +346,7 @@ async def handle_link(client: Client, message: Message):
         )
         return
 
-    # Check if user is already processing something
+    # Check if user is already selecting quality
     state = get_state(user_id)
     if state.step not in [UserStep.IDLE, UserStep.WAITING_COOKIES]:
         await message.reply_text(
@@ -247,8 +469,14 @@ async def callback_resolution(client: Client, callback: CallbackQuery):
     # Format quality label
     quality_label = f"{resolution}p" if resolution != "best" else "Best Quality"
 
+    # Show queue status in confirmation
+    queue_status = download_queue.get_user_queue_status(user_id)
+    queue_info = ""
+    if queue_status["active_count"] > 0:
+        queue_info = f"\n📊 Queue: {queue_status['active_count']} active, {queue_status['pending_count']} pending"
+
     caption = format_metadata_caption(metadata)
-    caption += f"\n\n✅ **Ready to download**\n📺 Quality: {quality_label}\n🔊 Audio: All languages\n\nTap Start to begin."
+    caption += f"\n\n✅ **Ready to download**\n📺 Quality: {quality_label}\n🔊 Audio: All languages{queue_info}\n\nTap Start to begin."
 
     keyboard = build_confirmation_keyboard()
 
@@ -314,7 +542,10 @@ async def callback_cancel(client: Client, callback: CallbackQuery):
 @Client.on_callback_query(filters.regex("^dl_start$"))
 @authorized
 async def callback_start_download(client: Client, callback: CallbackQuery):
-    """Handle start download button."""
+    """Handle start download button - adds to queue."""
+    global _client
+    _client = client
+
     user_id = callback.from_user.id
     state = get_state(user_id)
 
@@ -322,7 +553,16 @@ async def callback_start_download(client: Client, callback: CallbackQuery):
         await callback.answer("Session expired. Send the link again.", show_alert=True)
         return
 
-    await callback.answer("Starting download...")
+    # Check if user is at the queue limit
+    queue_status = download_queue.get_user_queue_status(user_id)
+    total_user_downloads = queue_status["active_count"] + queue_status["pending_count"]
+
+    if total_user_downloads >= download_queue.MAX_CONCURRENT_PER_USER * 2:
+        await callback.answer(
+            f"You have {total_user_downloads} downloads queued. Please wait for some to complete.",
+            show_alert=True
+        )
+        return
 
     # Get user settings
     settings = await db.get_user_settings(user_id)
@@ -335,8 +575,8 @@ async def callback_start_download(client: Client, callback: CallbackQuery):
     resolution = state.selected_resolution
     cookies_path = get_user_cookies_path(user_id)
 
-    # Update state to downloading
-    set_state(user_id, step=UserStep.DOWNLOADING)
+    # Clear the selection state
+    clear_state(user_id)
 
     # Delete the selection message
     try:
@@ -344,159 +584,99 @@ async def callback_start_download(client: Client, callback: CallbackQuery):
     except Exception:
         pass
 
-    # Create progress message
-    progress_msg = await client.send_message(
+    # Add to queue
+    item, position = await download_queue.add(
+        user_id=user_id,
         chat_id=callback.message.chat.id,
-        text=f"⬇️ **Starting download...**\n\n{metadata_dict['title']}"
+        metadata=metadata_dict,
+        resolution=resolution,
+        cookies_path=cookies_path,
+        output_format=output_format,
+        upload_mode=upload_mode,
+        gofile_token=gofile_token,
+        custom_thumbnail=custom_thumbnail,
+        user_name=callback.from_user.first_name or ""
     )
 
-    download_progress = DownloadProgress(progress_msg)
-    upload_progress = UploadProgress(progress_msg)
-
-    result = None
-    thumb_path = None
-
-    try:
-        # Generate filename
-        filename = sanitize_filename(metadata_dict['title'])
-        if not metadata_dict['is_movie'] and metadata_dict['season'] and metadata_dict['episode']:
-            filename = f"{filename}_S{metadata_dict['season']:02d}E{metadata_dict['episode']:02d}"
-
-        # Download (clean_download_directory is called inside downloader.download)
-        result = await downloader.download(
-            m3u8_url=metadata_dict['m3u8_url'],
-            filename=filename,
-            cookies_path=cookies_path,
-            resolution=resolution if resolution != "best" else None,
-            output_format=output_format,
-            progress_callback=download_progress.callback
-        )
-
-        if not result.success:
-            await progress_msg.edit_text(f"❌ **Download failed**\n\n{result.error or 'Unknown error'}")
-            clear_state(user_id)
-            return
-
-        # Update state to uploading
-        set_state(user_id, step=UserStep.UPLOADING)
-        await progress_msg.edit_text(f"⬆️ **Preparing upload...**\n\n{metadata_dict['title']}")
-
-        # Get video duration
-        duration = await get_video_duration(result.file_path) or metadata_dict.get('duration')
-
-        # Get thumbnail
-        thumb_service = ThumbnailService(client)
-        thumb_path = await thumb_service.get_thumbnail(
-            user_id=user_id,
-            custom_file_id=custom_thumbnail,
-            fallback_url=metadata_dict.get('image'),
-            filename=filename
-        )
-
-        # Extract media info using pymediainfo
-        media_info = extract_media_info(result.file_path)
-        audio_count = len(media_info.audio_tracks) if media_info else 0
-        subtitle_count = media_info.subtitle_count if media_info else 0
-        quality_label = media_info.quality_label if media_info and media_info.height else (f"{resolution}p" if resolution and resolution != "best" else "Best")
-
-        # Generate clean filename with audio info and rename file
-        clean_filename = generate_filename(
-            title=metadata_dict['title'],
-            audio_count=audio_count,
-            season=metadata_dict.get('season') if not metadata_dict['is_movie'] else None,
-            episode=metadata_dict.get('episode') if not metadata_dict['is_movie'] else None
-        )
-        new_file_path = os.path.join(DOWNLOAD_DIR, f"{clean_filename}.{output_format}")
-
-        # Rename the file if paths are different
-        if result.file_path != new_file_path:
-            try:
-                # Handle case where new path already exists
-                if os.path.exists(new_file_path):
-                    os.remove(new_file_path)
-                os.rename(result.file_path, new_file_path)
-                result.file_path = new_file_path
-            except Exception as e:
-                print(f"[Download] Could not rename file: {e}")
-                # Continue with original filename if rename fails
-
-        # Create Telegraph page for mediainfo
-        mediainfo_link = None
-        if media_info and (audio_count > 0 or subtitle_count > 0):
-            try:
-                mediainfo_link = await create_telegraph_page(
-                    title=metadata_dict['title'],
-                    media_info=media_info,
-                    file_path=result.file_path
-                )
-            except Exception as e:
-                print(f"[Download] Telegraph error: {e}")
-
-        # Build detailed caption with new format
-        caption = build_detailed_caption(
-            title=metadata_dict['title'],
-            show_title=metadata_dict['title'] if not metadata_dict['is_movie'] else None,
-            season=metadata_dict.get('season'),
-            episode=metadata_dict.get('episode'),
-            episode_title=metadata_dict.get('episode_title'),
-            quality=quality_label,
-            is_movie=metadata_dict['is_movie'],
-            user_mention=format_user_mention(user_id, callback.from_user.first_name),
-            audio_count=audio_count,
-            subtitle_count=subtitle_count,
-            mediainfo_link=mediainfo_link
-        )
-
-        # Upload
-        uploader = Uploader(client)
-        upload_result = await uploader.upload(
+    # Notify user
+    if queue_status["active_count"] < download_queue.MAX_CONCURRENT_PER_USER:
+        await callback.answer(f"Download starting... (Task: {item.id})")
+    else:
+        await callback.answer(f"Added to queue. Task: {item.id}")
+        # Send queue position message with task ID
+        await client.send_message(
             chat_id=callback.message.chat.id,
-            file_path=result.file_path,
-            caption=caption,
-            thumb_path=thumb_path,
-            duration=duration,
-            gofile_token=gofile_token,
-            upload_mode=upload_mode,
-            progress_callback=upload_progress.callback
+            text=f"⏳ **Added to queue**\n\n"
+                 f"**Task ID:** `{item.id}`\n"
+                 f"**Title:** {metadata_dict['title'][:50]}...\n"
+                 f"**Position:** #{position}\n"
+                 f"**Active downloads:** {queue_status['active_count']}/{download_queue.MAX_CONCURRENT_PER_USER}\n\n"
+                 f"Your download will start when a slot becomes available.\n"
+                 f"Cancel with: `/canceltask {item.id}`"
         )
 
-        if upload_result.success:
-            if upload_result.platform == "gofile":
-                # File was uploaded to Gofile - build caption with gofile link
-                final_text = build_detailed_caption(
-                    title=metadata_dict['title'],
-                    show_title=metadata_dict['title'] if not metadata_dict['is_movie'] else None,
-                    season=metadata_dict.get('season'),
-                    episode=metadata_dict.get('episode'),
-                    episode_title=metadata_dict.get('episode_title'),
-                    quality=quality_label,
-                    is_movie=metadata_dict['is_movie'],
-                    user_mention=format_user_mention(user_id, callback.from_user.first_name),
-                    audio_count=audio_count,
-                    subtitle_count=subtitle_count,
-                    mediainfo_link=mediainfo_link,
-                    gofile_link=upload_result.gofile_link
-                )
-                await progress_msg.edit_text(final_text, disable_web_page_preview=True)
-            else:
-                # Video was sent to Telegram, delete progress message
-                await progress_msg.delete()
-        else:
-            await progress_msg.edit_text(f"❌ **Upload failed**\n\n{upload_result.error or 'Unknown error'}")
+    # Ensure queue worker is running
+    await download_queue.start_worker()
 
-    except Exception as e:
-        await progress_msg.edit_text(f"❌ **Error**\n\n{str(e)[:200]}")
 
-    finally:
-        # Cleanup
-        clear_state(user_id)
+@Client.on_message(filters.command("queue") & filters.private)
+@authorized
+async def cmd_queue(client: Client, message: Message):
+    """Show user's queue status."""
+    user_id = message.from_user.id
+    status_text = format_queue_status(user_id)
 
-        # Remove thumbnail
-        if thumb_path and os.path.exists(thumb_path):
-            try:
-                os.remove(thumb_path)
-            except Exception:
-                pass
+    # Add global stats for info
+    global_stats = download_queue.get_global_stats()
+    status_text += f"\n\n📈 **Global:** {global_stats['active_downloads']} active, {global_stats['pending_downloads']} pending"
 
-        # Clean up entire download directory to ensure no old files remain
-        clean_download_directory()
+    await message.reply_text(status_text)
+
+
+@Client.on_message(filters.command("cancelqueue") & filters.private)
+@authorized
+async def cmd_cancel_queue(client: Client, message: Message):
+    """Cancel all pending downloads in user's queue."""
+    user_id = message.from_user.id
+
+    cancelled = await download_queue.cancel_user_downloads(user_id)
+
+    if cancelled > 0:
+        await message.reply_text(f"✅ Cancelled {cancelled} pending download(s).")
+    else:
+        await message.reply_text("No pending downloads to cancel.")
+
+
+@Client.on_message(filters.command("canceltask") & filters.private)
+@authorized
+async def cmd_cancel_task(client: Client, message: Message):
+    """Cancel a specific task by ID."""
+    user_id = message.from_user.id
+
+    # Parse task ID from command
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.reply_text(
+            "**Usage:** `/canceltask DL-XXXX`\n\n"
+            "Use /queue to see your task IDs."
+        )
+        return
+
+    task_id = parts[1].strip().upper()
+
+    # Validate task ID format
+    if not task_id.startswith("DL-") or len(task_id) != 7:
+        await message.reply_text(
+            f"**Invalid task ID:** `{task_id}`\n\n"
+            "Task IDs look like: `DL-A3X9`\n"
+            "Use /queue to see your task IDs."
+        )
+        return
+
+    # Try to cancel the task
+    success, result_message = await download_queue.cancel(task_id, user_id)
+
+    if success:
+        await message.reply_text(f"✅ **Task Cancelled**\n\n{result_message}")
+    else:
+        await message.reply_text(f"❌ **Cannot Cancel**\n\n{result_message}")

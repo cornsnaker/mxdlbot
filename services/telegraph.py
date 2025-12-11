@@ -1,5 +1,6 @@
 """
 Telegraph service for uploading MediaInfo.
+Displays raw mediainfo text output for detailed technical information.
 """
 
 import aiohttp
@@ -9,7 +10,7 @@ from utils.mediainfo import MediaInfo
 
 async def create_telegraph_page(title: str, media_info: MediaInfo, file_path: str) -> Optional[str]:
     """
-    Create a Telegraph page with MediaInfo details.
+    Create a Telegraph page with raw MediaInfo text.
 
     Args:
         title: Video title
@@ -23,8 +24,12 @@ async def create_telegraph_page(title: str, media_info: MediaInfo, file_path: st
         # Get raw mediainfo text
         raw_mediainfo = await get_raw_mediainfo(file_path)
 
-        # Build HTML content
-        content = build_mediainfo_html(title, media_info, raw_mediainfo)
+        if not raw_mediainfo or raw_mediainfo == "MediaInfo not available":
+            print("[Telegraph] No mediainfo available")
+            return None
+
+        # Build HTML content with raw mediainfo text
+        content = build_raw_mediainfo_html(title, media_info, raw_mediainfo)
 
         # Create Telegraph page
         async with aiohttp.ClientSession() as session:
@@ -58,7 +63,7 @@ async def create_telegraph_page(title: str, media_info: MediaInfo, file_path: st
                     print(f"[Telegraph] Page creation failed: status {resp.status}")
                     return None
                 result = await resp.json()
-                print(f"[Telegraph] Page result: {result}")
+                print(f"[Telegraph] Page created successfully")
                 if result.get("ok"):
                     return result["result"]["url"]
                 else:
@@ -107,9 +112,76 @@ async def get_raw_mediainfo(file_path: str) -> str:
     return "MediaInfo not available"
 
 
+def build_raw_mediainfo_html(title: str, media_info: MediaInfo, raw_mediainfo: str) -> str:
+    """
+    Build HTML content for Telegraph page with raw mediainfo text.
+    Shows the raw mediainfo output as the primary content.
+
+    Args:
+        title: Video title
+        media_info: Parsed MediaInfo object
+        raw_mediainfo: Raw mediainfo text output
+
+    Returns:
+        JSON-encoded HTML content for Telegraph API
+    """
+    import json
+
+    content = []
+
+    # Title
+    content.append({"tag": "h3", "children": [title]})
+
+    # Quick summary (brief overview before raw output)
+    if media_info:
+        summary_parts = []
+
+        # Quality
+        if media_info.width and media_info.height:
+            summary_parts.append(f"{media_info.quality_label}")
+
+        # Audio tracks
+        if media_info.audio_tracks:
+            audio_count = len(media_info.audio_tracks)
+            if audio_count == 1:
+                summary_parts.append("1 Audio")
+            else:
+                summary_parts.append(f"{audio_count} Audio Tracks")
+
+        # Subtitles
+        if media_info.subtitles:
+            sub_count = len(media_info.subtitles)
+            if sub_count == 1:
+                summary_parts.append("1 Subtitle")
+            else:
+                summary_parts.append(f"{sub_count} Subtitles")
+
+        if summary_parts:
+            content.append({"tag": "p", "children": [" | ".join(summary_parts)]})
+
+    # Horizontal rule before raw output
+    content.append({"tag": "hr"})
+
+    # Raw MediaInfo output (the main content)
+    content.append({"tag": "h4", "children": ["MediaInfo Output"]})
+
+    # Split raw mediainfo into sections for better readability
+    # but preserve the raw text format
+    raw_text = raw_mediainfo.strip()
+
+    # Limit to 8000 characters to avoid Telegraph limits
+    if len(raw_text) > 8000:
+        raw_text = raw_text[:8000] + "\n\n[Truncated due to length...]"
+
+    content.append({"tag": "pre", "children": [raw_text]})
+
+    return json.dumps(content)
+
+
 def build_mediainfo_html(title: str, media_info: MediaInfo, raw_mediainfo: str) -> str:
     """
-    Build HTML content for Telegraph page.
+    Build detailed HTML content for Telegraph page.
+    Alternative function that shows structured info + raw output.
 
     Args:
         title: Video title
