@@ -389,7 +389,7 @@ async def callback_settings_close(client: Client, callback: CallbackQuery):
     await callback.answer()
 
 
-@Client.on_message(filters.text & filters.private)
+@Client.on_message(filters.text & filters.private, group=-1)
 @authorized
 async def handle_settings_input(client: Client, message: Message):
     """Handle text input for settings (Gofile token)."""
@@ -397,6 +397,7 @@ async def handle_settings_input(client: Client, message: Message):
     state = get_state(user_id)
 
     if state.step != UserStep.WAITING_COOKIES:
+        # Not waiting for input, let other handlers process
         return
 
     if not state.metadata or 'waiting_for' not in state.metadata:
@@ -409,6 +410,7 @@ async def handle_settings_input(client: Client, message: Message):
 
         if len(token) < 10:
             await message.reply_text("Invalid token. Please try again or send /cancel.")
+            message.stop_propagation()
             return
 
         await db.set_gofile_token(user_id, token)
@@ -418,9 +420,10 @@ async def handle_settings_input(client: Client, message: Message):
             "**Gofile token saved!**\n\n"
             "Your large files will now be uploaded to your Gofile account."
         )
+        message.stop_propagation()
 
 
-@Client.on_message(filters.photo & filters.private)
+@Client.on_message(filters.photo & filters.private, group=-1)
 @authorized
 async def handle_thumbnail_upload(client: Client, message: Message):
     """Handle thumbnail photo upload."""
@@ -445,3 +448,4 @@ async def handle_thumbnail_upload(client: Client, message: Message):
         "**Thumbnail saved!**\n\n"
         "This thumbnail will be used for all your video uploads."
     )
+    message.stop_propagation()
