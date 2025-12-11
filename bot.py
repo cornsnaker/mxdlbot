@@ -42,13 +42,12 @@ from config import (
 )
 from states import (
     UserStep,
-    UserState,
     get_state,
     set_state,
     clear_state
 )
 import mx_engine
-from uploader import upload_with_progress, generate_progress_bar
+from uploader import upload_with_progress, generate_progress_bar, format_time
 
 # Setup logging
 logging.basicConfig(
@@ -107,7 +106,7 @@ def validate_netscape_cookies(content: str) -> bool:
 
 # --- KEYBOARD BUILDERS ---
 def build_resolution_keyboard(resolutions: list) -> InlineKeyboardMarkup:
-    """Build inline keyboard for resolution selection (Step 1)."""
+    """Build inline keyboard for resolution selection."""
     buttons = []
     row = []
 
@@ -131,37 +130,8 @@ def build_resolution_keyboard(resolutions: list) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
-def build_audio_keyboard(audio_tracks: list) -> InlineKeyboardMarkup:
-    """Build inline keyboard for audio selection (Step 2)."""
-    buttons = []
-    row = []
-
-    for track in audio_tracks:
-        name = track.get('name', track.get('language', 'Unknown'))
-        lang = track.get('language', '')
-        label = f"🔊 {name}"
-        callback = f"audio:{lang}"
-        row.append(InlineKeyboardButton(text=label, callback_data=callback))
-
-        # 2 buttons per row
-        if len(row) == 2:
-            buttons.append(row)
-            row = []
-
-    if row:
-        buttons.append(row)
-
-    # Back and Cancel buttons
-    buttons.append([
-        InlineKeyboardButton(text="⬅️ Back", callback_data="back"),
-        InlineKeyboardButton(text="❌ Cancel", callback_data="cancel")
-    ])
-
-    return InlineKeyboardMarkup(buttons)
-
-
 def build_confirmation_keyboard() -> InlineKeyboardMarkup:
-    """Build inline keyboard for confirmation (Step 3)."""
+    """Build inline keyboard for confirmation."""
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(text="⬇️ Start Download", callback_data="start")],
         [
@@ -172,33 +142,24 @@ def build_confirmation_keyboard() -> InlineKeyboardMarkup:
 
 
 # --- CAPTION BUILDERS ---
-def build_step1_caption(metadata: dict) -> str:
-    """Build caption for Step 1 (quality selection)."""
+def build_quality_caption(metadata: dict) -> str:
+    """Build caption for quality selection."""
     caption = f"🎬 **{metadata['title']}**\n"
     if not metadata['is_movie']:
         caption += f"📅 Season: {metadata['season']} | Episode: {metadata['episode']}\n"
         if metadata.get('episode_title'):
             caption += f"📝 {metadata['episode_title']}\n"
-    caption += "\n**Step 1/2:** Select video quality"
+    caption += "\n**Select video quality:**"
     return caption
 
 
-def build_step2_caption(metadata: dict) -> str:
-    """Build caption for Step 2 (audio selection)."""
-    caption = f"🎬 **{metadata['title']}**\n"
-    if not metadata['is_movie']:
-        caption += f"📅 Season: {metadata['season']} | Episode: {metadata['episode']}\n"
-    caption += "\n**Step 2/2:** Select audio language"
-    return caption
-
-
-def build_confirmation_caption(metadata: dict, resolution: str, audio: str) -> str:
+def build_confirmation_caption(metadata: dict, resolution: str) -> str:
     """Build caption for confirmation step."""
     caption = f"🎬 **{metadata['title']}**\n\n"
     caption += "✅ **Ready to download**\n"
     caption += f"📺 Quality: {resolution}p\n"
-    caption += f"🔊 Audio: {audio}\n\n"
-    caption += "Tap Start to begin downloading."
+    caption += f"🔊 Audio: All languages\n\n"
+    caption += "Tap **Start Download** to begin."
     return caption
 
 
@@ -349,8 +310,8 @@ async def process_link(client: Client, message: Message):
             )
             return
 
-        # Parse m3u8 for resolutions and audio tracks
-        resolutions, audio_tracks = await mx_engine.parse_master_m3u8(metadata['m3u8'])
+        # Parse m3u8 for resolutions only (all audio languages will be downloaded)
+        resolutions, _ = await mx_engine.parse_master_m3u8(metadata['m3u8'])
 
         # Store state
         set_state(
@@ -358,49 +319,28 @@ async def process_link(client: Client, message: Message):
             step=UserStep.SELECT_QUALITY,
             url=url,
             metadata=metadata,
-            resolutions=resolutions,
-            audio_tracks=audio_tracks
+            resolutions=resolutions
         )
 
-        # Determine the flow based on available options
-        skip_quality = len(resolutions) <= 1
-        skip_audio = len(audio_tracks) <= 1
-
-        if skip_quality and skip_audio:
-            # Go directly to confirmation with defaults
+        # Check if we need quality selection
+        if len(resolutions) <= 1:
+            # Go directly to confirmation with default/best
             default_res = resolutions[0]['height'] if resolutions else "best"
-            default_audio = audio_tracks[0].get('language', 'default') if audio_tracks else "default"
-            default_audio_name = audio_tracks[0].get('name', 'Default') if audio_tracks else "Default"
 
             set_state(
                 user_id,
                 step=UserStep.CONFIRMATION,
-                selected_resolution=str(default_res),
-                selected_audio=default_audio
+                selected_resolution=str(default_res)
             )
 
             caption = build_confirmation_caption(
                 metadata,
-                default_res if default_res != "best" else "Best",
-                default_audio_name
+                default_res if default_res != "best" else "Best"
             )
             keyboard = build_confirmation_keyboard()
-
-        elif skip_quality:
-            # Skip to audio selection
-            default_res = resolutions[0]['height'] if resolutions else "best"
-            set_state(
-                user_id,
-                step=UserStep.SELECT_AUDIO,
-                selected_resolution=str(default_res)
-            )
-
-            caption = build_step2_caption(metadata)
-            keyboard = build_audio_keyboard(audio_tracks)
-
         else:
-            # Show quality selection (Step 1)
-            caption = build_step1_caption(metadata)
+            # Show quality selection
+            caption = build_quality_caption(metadata)
             keyboard = build_resolution_keyboard(resolutions)
 
         # Delete status message and show selection UI
@@ -440,87 +380,14 @@ async def callback_resolution(client: Client, callback: CallbackQuery):
     # Extract resolution
     resolution = callback.data.split(':')[1]
 
-    # Store selection
-    set_state(user_id, selected_resolution=resolution)
-
-    # Check if we need audio selection
-    audio_tracks = state.audio_tracks or []
-
-    if len(audio_tracks) <= 1:
-        # Skip to confirmation
-        default_audio = audio_tracks[0].get('language', 'default') if audio_tracks else "default"
-        default_audio_name = audio_tracks[0].get('name', 'Default') if audio_tracks else "Default"
-
-        set_state(
-            user_id,
-            step=UserStep.CONFIRMATION,
-            selected_audio=default_audio
-        )
-
-        caption = build_confirmation_caption(
-            state.metadata,
-            resolution,
-            default_audio_name
-        )
-        keyboard = build_confirmation_keyboard()
-    else:
-        # Move to audio selection
-        set_state(user_id, step=UserStep.SELECT_AUDIO)
-
-        caption = build_step2_caption(state.metadata)
-        keyboard = build_audio_keyboard(audio_tracks)
-
-    # Edit message
-    try:
-        await callback.message.edit_caption(
-            caption=caption,
-            reply_markup=keyboard
-        )
-    except Exception:
-        try:
-            await callback.message.edit_text(
-                text=caption,
-                reply_markup=keyboard
-            )
-        except Exception as e:
-            logger.error(f"Error editing message: {e}")
-
-    await callback.answer()
-
-
-@app.on_callback_query(filters.regex(r'^audio:'))
-async def callback_audio(client: Client, callback: CallbackQuery):
-    """Handle audio selection callback."""
-    user_id = callback.from_user.id
-    state = get_state(user_id)
-
-    # Validate state
-    if state.step != UserStep.SELECT_AUDIO:
-        await callback.answer("❌ Session expired. Please send the link again.")
-        return
-
-    # Extract audio language
-    audio_lang = callback.data.split(':')[1]
-
-    # Find audio name for display
-    audio_name = "Default"
-    for track in (state.audio_tracks or []):
-        if track.get('language') == audio_lang:
-            audio_name = track.get('name', audio_lang)
-            break
-
-    # Store selection and move to confirmation
+    # Store selection and go to confirmation (all audio languages downloaded automatically)
     set_state(
         user_id,
         step=UserStep.CONFIRMATION,
-        selected_audio=audio_lang
+        selected_resolution=resolution
     )
 
-    caption = build_confirmation_caption(
-        state.metadata,
-        state.selected_resolution,
-        audio_name
-    )
+    caption = build_confirmation_caption(state.metadata, resolution)
     keyboard = build_confirmation_keyboard()
 
     # Edit message
@@ -547,27 +414,11 @@ async def callback_back(client: Client, callback: CallbackQuery):
     user_id = callback.from_user.id
     state = get_state(user_id)
 
-    if state.step == UserStep.SELECT_AUDIO:
+    if state.step == UserStep.CONFIRMATION:
         # Go back to quality selection
         set_state(user_id, step=UserStep.SELECT_QUALITY)
-
-        caption = build_step1_caption(state.metadata)
+        caption = build_quality_caption(state.metadata)
         keyboard = build_resolution_keyboard(state.resolutions or [])
-
-    elif state.step == UserStep.CONFIRMATION:
-        # Go back to audio selection (or quality if no audio tracks)
-        audio_tracks = state.audio_tracks or []
-
-        if len(audio_tracks) <= 1:
-            # Go back to quality selection
-            set_state(user_id, step=UserStep.SELECT_QUALITY)
-            caption = build_step1_caption(state.metadata)
-            keyboard = build_resolution_keyboard(state.resolutions or [])
-        else:
-            # Go back to audio selection
-            set_state(user_id, step=UserStep.SELECT_AUDIO)
-            caption = build_step2_caption(state.metadata)
-            keyboard = build_audio_keyboard(audio_tracks)
     else:
         await callback.answer("❌ Session expired.")
         return
@@ -649,7 +500,6 @@ async def callback_start_download(client: Client, callback: CallbackQuery):
         "url": state.url,
         "metadata": state.metadata,
         "resolution": state.selected_resolution,
-        "audio": state.selected_audio,
         "chat_id": chat_id,
         "user_id": user_id
     })
@@ -685,7 +535,6 @@ async def worker():
             chat_id = task["chat_id"]
             metadata = task["metadata"]
             resolution = task["resolution"]
-            audio = task["audio"]
 
             # Generate filename
             if metadata['is_movie']:
@@ -697,40 +546,60 @@ async def worker():
             # Progress message
             prog_msg = await app.send_message(
                 chat_id,
-                f"⬇️ **Downloading {metadata['title']}**\n"
-                f"{generate_progress_bar(0)}\n"
-                "`Starting download...`"
+                "**Downloading**\n\n"
+                f"`{generate_progress_bar(0)}` **0.0%**\n\n"
+                "**Status:** Starting download..."
             )
 
             try:
-                # Progress callback
+                # Progress tracking state
+                download_start_time = time.time()
                 last_edit_time = 0
+                last_percent = 0
 
                 async def download_progress(percent: float, raw_line: str):
-                    nonlocal last_edit_time
+                    nonlocal last_edit_time, last_percent
                     now = time.time()
 
-                    # Update every 5 seconds
-                    if now - last_edit_time > 5:
+                    # Update every 3 seconds
+                    if now - last_edit_time > 3:
                         try:
-                            await prog_msg.edit_text(
-                                f"⬇️ **Downloading {metadata['title']}**\n"
-                                f"{generate_progress_bar(percent)}\n"
-                                f"`{raw_line[:50]}...`" if len(raw_line) > 50 else f"`{raw_line}`"
+                            # Calculate ETA based on progress
+                            elapsed = now - download_start_time
+                            if percent > 0:
+                                total_estimated = elapsed / (percent / 100)
+                                eta_seconds = total_estimated - elapsed
+                            else:
+                                eta_seconds = -1
+
+                            eta_str = format_time(eta_seconds)
+                            elapsed_str = format_time(elapsed)
+
+                            # Extract meaningful status from raw_line
+                            status = raw_line[:60] + "..." if len(raw_line) > 60 else raw_line
+
+                            text = (
+                                f"**Downloading**\n\n"
+                                f"`{generate_progress_bar(percent)}` **{percent:.1f}%**\n\n"
+                                f"**Elapsed:** {elapsed_str}\n"
+                                f"**ETA:** {eta_str}\n"
+                                f"**Status:** `{status}`"
                             )
+
+                            await prog_msg.edit_text(text)
                             last_edit_time = now
+                            last_percent = percent
                         except FloodWait as e:
                             await asyncio.sleep(e.value)
                         except Exception:
                             pass
 
-                # Execute download
+                # Execute download (all audio languages included automatically)
                 file_path, success = await mx_engine.run_download(
                     m3u8_url=metadata['m3u8'],
                     filename=clean_name,
                     user_id=user_id,
                     resolution=resolution,
-                    audio_track=audio,
                     progress_callback=download_progress
                 )
 

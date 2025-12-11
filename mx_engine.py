@@ -263,6 +263,37 @@ def _parse_audio_media_line(line: str) -> Optional[Dict]:
     return None
 
 
+def parse_netscape_cookies_to_header(cookies_path: str) -> str:
+    """
+    Parse Netscape format cookies file and convert to Cookie header string.
+
+    Args:
+        cookies_path: Path to cookies.txt file
+
+    Returns:
+        Cookie header string like "name1=value1; name2=value2"
+    """
+    cookies = []
+    try:
+        with open(cookies_path, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                line = line.strip()
+                # Skip empty lines and comments
+                if not line or line.startswith('#'):
+                    continue
+                # Netscape format: domain, flag, path, secure, expiry, name, value
+                parts = line.split('\t')
+                if len(parts) >= 7:
+                    name = parts[5]
+                    value = parts[6]
+                    cookies.append(f"{name}={value}")
+    except Exception as e:
+        print(f"Error parsing cookies: {e}")
+        return ""
+
+    return "; ".join(cookies)
+
+
 async def download_thumbnail(image_url: str, save_path: str) -> bool:
     """
     Download thumbnail image from URL.
@@ -326,18 +357,16 @@ async def run_download(
     filename: str,
     user_id: int,
     resolution: Optional[str] = None,
-    audio_track: Optional[str] = None,
     progress_callback: Optional[Callable] = None
 ) -> Tuple[str, bool]:
     """
-    Run N_m3u8DL-RE asynchronously with quality/audio selection and progress tracking.
+    Run N_m3u8DL-RE asynchronously with quality selection and all audio tracks.
 
     Args:
         m3u8_url: Master m3u8 URL
         filename: Output filename (without extension)
         user_id: Telegram user ID for cookie lookup
         resolution: Selected resolution height (e.g., "1080") or None for best
-        audio_track: Selected audio language code (e.g., "hi") or None for default
         progress_callback: Async callback function(percent, raw_line)
 
     Returns:
@@ -353,29 +382,33 @@ async def run_download(
         "--save-name", filename,
         "--thread-count", "16",
         "--download-retry-count", "5",
-        "-M", "format=mp4"
+        # Mux to MP4 with ffmpeg muxer for full metadata
+        "-M", "format=mp4:muxer=ffmpeg",
+        # Download video, audio, and subtitles concurrently
+        "-mt",
+        # Auto-select best tracks
+        "--auto-select"
     ]
 
-    # Add per-user cookies if available
+    # Add custom headers
+    cmd.extend(["-H", f"User-Agent: {USER_AGENT}"])
+    cmd.extend(["-H", f"Origin: {ORIGIN}"])
+    cmd.extend(["-H", f"Referer: {ORIGIN}/"])
+
+    # Add per-user cookies via header (N_m3u8DL-RE uses -H for cookies)
     cookies_path = get_user_cookies_path(user_id)
     if os.path.exists(cookies_path):
-        with open(cookies_path, 'r') as f:
-            cookie_content = f.read().strip()
-        if cookie_content:
-            cmd.extend(["--header", f"Cookie: {cookie_content}"])
+        cookie_header = parse_netscape_cookies_to_header(cookies_path)
+        if cookie_header:
+            cmd.extend(["-H", f"Cookie: {cookie_header}"])
 
-    # Add User-Agent header
-    cmd.extend(["--header", f"User-Agent: {USER_AGENT}"])
-
-    # Add resolution selection
-    if resolution:
+    # Add resolution selection if specified and not "best"
+    if resolution and resolution not in ["best", "Best"]:
         # Format: --select-video "res=1080*" for 1080p
-        cmd.extend(["--select-video", f"res={resolution}*"])
+        cmd.extend(["-sv", f"res={resolution}*"])
 
-    # Add audio selection
-    if audio_track:
-        # Format: --select-audio "lang=hi" for Hindi
-        cmd.extend(["--select-audio", f"lang={audio_track}"])
+    # Log the command for debugging
+    print(f"[DEBUG] Running command: {' '.join(cmd)}")
 
     # Run subprocess with timeout
     try:
@@ -393,6 +426,10 @@ async def run_download(
                     break
                 line_str = line.decode().strip()
 
+                # Log output for debugging
+                if line_str:
+                    print(f"[N_m3u8DL-RE] {line_str}")
+
                 # Parse progress percentage from N_m3u8DL-RE output
                 if "%" in line_str and progress_callback:
                     try:
@@ -408,8 +445,13 @@ async def run_download(
         await asyncio.wait_for(read_progress(), timeout=DOWNLOAD_TIMEOUT)
         await process.wait()
 
+        print(f"[DEBUG] Process exit code: {process.returncode}")
+
         final_path = f"{output_path}.mp4"
-        return final_path, process.returncode == 0 and os.path.exists(final_path)
+        exists = os.path.exists(final_path)
+        print(f"[DEBUG] Output file exists: {exists}, path: {final_path}")
+
+        return final_path, process.returncode == 0 and exists
 
     except asyncio.TimeoutError:
         # Kill process on timeout

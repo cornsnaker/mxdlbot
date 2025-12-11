@@ -3,25 +3,37 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# --- CONFIGURATION ---
+# --- TELEGRAM CONFIGURATION ---
 API_ID = int(os.getenv("API_ID", "123456"))  # Get from my.telegram.org
 API_HASH = os.getenv("API_HASH", "your_api_hash")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "your_bot_token")
 
+# --- MONGODB CONFIGURATION ---
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+DATABASE_NAME = os.getenv("DATABASE_NAME", "mxdlbot")
+
+# --- BOT CONFIGURATION ---
+# Owner ID - Has full control over the bot
+OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+
+# Admin IDs - Can use admin commands
+ADMINS = [int(x.strip()) for x in os.getenv("ADMINS", "").split(",") if x.strip()]
+
+# --- PATHS ---
 # Path to the N_m3u8DL-RE binary (Make sure this is executable!)
-BINARY_PATH = "N_m3u8DL-RE"
+BINARY_PATH = os.getenv("BINARY_PATH", "N_m3u8DL-RE")
 
 # Per-user cookie storage directory
-COOKIES_DIR = "cookies"
+COOKIES_DIR = os.getenv("COOKIES_DIR", "data/cookies")
 
 # Download directory for temporary files
-DOWNLOAD_DIR = "downloads"
+DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "data/downloads")
 
-# Admin IDs (for authorized access if needed)
-ADMINS = [123456789]
+# Thumbnail directory
+THUMBNAIL_DIR = os.getenv("THUMBNAIL_DIR", "data/thumbnails")
 
-# Create required directories on startup
-for directory in [DOWNLOAD_DIR, COOKIES_DIR]:
+# --- CREATE REQUIRED DIRECTORIES ---
+for directory in [DOWNLOAD_DIR, COOKIES_DIR, THUMBNAIL_DIR]:
     if not os.path.exists(directory):
         os.makedirs(directory)
 

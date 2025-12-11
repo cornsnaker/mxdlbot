@@ -12,5 +12,11 @@ aiofiles>=23.2.1
 # HTTP client for async web scraping
 aiohttp>=3.9.0
 
+# MongoDB async driver
+motor>=3.3.0
+
 # Environment variable loading
 python-dotenv>=1.0.0
+
+# Media info extraction
+pymediainfo>=6.0.1

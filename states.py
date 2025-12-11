@@ -13,7 +13,6 @@ class UserStep(Enum):
     IDLE = "idle"
     WAITING_COOKIES = "waiting_cookies"
     SELECT_QUALITY = "select_quality"
-    SELECT_AUDIO = "select_audio"
     CONFIRMATION = "confirmation"
     DOWNLOADING = "downloading"
     UPLOADING = "uploading"
@@ -29,18 +28,14 @@ class UserState:
         url: MX Player URL being processed
         metadata: Scraped metadata (title, season, episode, image, m3u8_url)
         resolutions: Parsed video resolutions from m3u8
-        audio_tracks: Parsed audio tracks from m3u8
         selected_resolution: User's chosen resolution
-        selected_audio: User's chosen audio track
         message_id: ID of the selection message for editing
     """
     step: UserStep = UserStep.IDLE
     url: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     resolutions: Optional[List[Dict[str, Any]]] = None
-    audio_tracks: Optional[List[Dict[str, Any]]] = None
     selected_resolution: Optional[str] = None
-    selected_audio: Optional[str] = None
     message_id: Optional[int] = None
 
 
