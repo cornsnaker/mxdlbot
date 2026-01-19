@@ -29,4 +29,4 @@ RUN wget https://github.com/cornsnaker/N_m3u8DL-RE/releases/download/V0.5.3.1-be
 COPY . .
 
 # Ensure the start script uses the correct command from your example
-CMD ["python", "run.py"]
+CMD ["python", "bot.py"]
